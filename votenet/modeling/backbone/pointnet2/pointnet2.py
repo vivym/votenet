@@ -4,6 +4,17 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from votenet.layers import (
+    gather_operation,
+    furthest_point_sample,
+    QueryAndGroup,
+    GroupAll,
+    three_nn,
+    three_interpolate,
+)
+
+from .misc import SharedMLP
+
 
 class _PointnetSAModuleBase(nn.Module):
     def __init__(self, num_points: int, groupers: nn.ModuleList, mlps: nn.ModuleList):
@@ -34,9 +45,9 @@ class _PointnetSAModuleBase(nn.Module):
         new_features_list = []
 
         xyz_flipped = xyz.transpose(1, 2).contiguous()
-        new_xyz = utils.gather_operation(
+        new_xyz = gather_operation(
             xyz_flipped,
-            utils.furthest_point_sample(xyz, self.num_points)
+            furthest_point_sample(xyz, self.num_points)
         ).transpose(1, 2).contiguous() if self.num_points is not None else None
 
         for i in range(len(self.groupers)):
@@ -91,13 +102,13 @@ class PointnetSAModuleMSG(_PointnetSAModuleBase):
         mlps = nn.ModuleList()
         for (radius, num_sample, mlp_spec) in zip(radii, num_samples, mlp_specs):
             self.groupers.append(
-                pointnet2_utils.QueryAndGroup(radius, num_sample, use_xyz=use_xyz, sample_uniformly=sample_uniformly)
-                if num_points is not None else pointnet2_utils.GroupAll(use_xyz)
+                QueryAndGroup(radius, num_sample, use_xyz=use_xyz, sample_uniformly=sample_uniformly)
+                if num_points is not None else GroupAll(use_xyz)
             )
             if use_xyz:
                 mlp_spec[0] += 3
 
-            self.mlps.append(pt_utils.SharedMLP(mlp_spec, bn=use_bn))
+            self.mlps.append(SharedMLP(mlp_spec, bn=use_bn))
 
         super().__init__(num_points, groupers, mlps)
 
@@ -136,16 +147,16 @@ class PointnetSAModuleVotes(nn.Module):
         self.ret_unique_cnt = ret_unique_cnt
 
         if npoint is not None:
-            self.grouper = pointnet2_utils.QueryAndGroup(radius, nsample,
+            self.grouper = QueryAndGroup(radius, nsample,
                 use_xyz=use_xyz, ret_grouped_xyz=True, normalize_xyz=normalize_xyz,
                 sample_uniformly=sample_uniformly, ret_unique_cnt=ret_unique_cnt)
         else:
-            self.grouper = pointnet2_utils.GroupAll(use_xyz, ret_grouped_xyz=True)
+            self.grouper = GroupAll(use_xyz, ret_grouped_xyz=True)
 
         mlp_spec = mlp
         if use_xyz and len(mlp_spec)>0:
             mlp_spec[0] += 3
-        self.mlp_module = pt_utils.SharedMLP(mlp_spec, bn=bn)
+        self.mlp_module = SharedMLP(mlp_spec, bn=bn)
 
     def forward(self, xyz: torch.Tensor,
                 features: torch.Tensor = None,
@@ -172,10 +183,10 @@ class PointnetSAModuleVotes(nn.Module):
 
         xyz_flipped = xyz.transpose(1, 2).contiguous()
         if inds is None:
-            inds = pointnet2_utils.furthest_point_sample(xyz, self.npoint)
+            inds = furthest_point_sample(xyz, self.npoint)
         else:
             assert(inds.shape[1] == self.npoint)
-        new_xyz = pointnet2_utils.gather_operation(
+        new_xyz = gather_operation(
             xyz_flipped, inds
         ).transpose(1, 2).contiguous() if self.npoint is not None else None
 
@@ -225,7 +236,7 @@ class PointnetFPModule(nn.Module):
 
     def __init__(self, *, mlp: List[int], bn: bool = True):
         super().__init__()
-        self.mlp = pt_utils.SharedMLP(mlp, bn=bn)
+        self.mlp = SharedMLP(mlp, bn=bn)
 
     def forward(
             self, unknown: torch.Tensor, known: torch.Tensor,
@@ -250,12 +261,12 @@ class PointnetFPModule(nn.Module):
         """
 
         if known is not None:
-            dist, idx = pointnet2_utils.three_nn(unknown, known)
+            dist, idx = three_nn(unknown, known)
             dist_recip = 1.0 / (dist + 1e-8)
             norm = torch.sum(dist_recip, dim=2, keepdim=True)
             weight = dist_recip / norm
 
-            interpolated_feats = pointnet2_utils.three_interpolate(
+            interpolated_feats = three_interpolate(
                 known_feats, idx, weight
             )
         else:
@@ -264,8 +275,9 @@ class PointnetFPModule(nn.Module):
             )
 
         if unknow_feats is not None:
-            new_features = torch.cat([interpolated_feats, unknow_feats],
-                                   dim=1)  #(B, C2 + C1, n)
+            new_features = torch.cat(
+                [interpolated_feats, unknow_feats], dim=1
+            )  #(B, C2 + C1, n)
         else:
             new_features = interpolated_feats
 

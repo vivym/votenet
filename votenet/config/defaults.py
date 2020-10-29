@@ -30,34 +30,7 @@ _C.MODEL.WEIGHTS = ""
 # INPUT
 # -----------------------------------------------------------------------------
 _C.INPUT = CN()
-# Size of the smallest side of the image during training
-_C.INPUT.MIN_SIZE_TRAIN = (800,)
-# Sample size of smallest side by choice or random selection from range give by
-# INPUT.MIN_SIZE_TRAIN
-_C.INPUT.MIN_SIZE_TRAIN_SAMPLING = "choice"
-# Maximum size of the side of the image during training
-_C.INPUT.MAX_SIZE_TRAIN = 1333
-# Size of the smallest side of the image during testing. Set to zero to disable resize in testing.
-_C.INPUT.MIN_SIZE_TEST = 800
-# Maximum size of the side of the image during testing
-_C.INPUT.MAX_SIZE_TEST = 1333
-# Mode for flipping images used in data augmentation during training
-# choose one of ["horizontal, "vertical", "none"]
-_C.INPUT.RANDOM_FLIP = "horizontal"
-
-# `True` if cropping is used for data augmentation during training
-_C.INPUT.CROP = CN({"ENABLED": False})
-# Cropping type:
-# - "relative" crop (H * CROP.SIZE[0], W * CROP.SIZE[1]) part of an input of size (H, W)
-# - "relative_range" uniformly sample relative crop size from between [CROP.SIZE[0], [CROP.SIZE[1]].
-#   and  [1, 1] and use it as in "relative" scenario.
-# - "absolute" crop part of an input with absolute size: (CROP.SIZE[0], CROP.SIZE[1]).
-# - "absolute_range", for an input of size (H, W), uniformly sample H_crop in
-#   [CROP.SIZE[0], min(H, CROP.SIZE[1])] and W_crop in [CROP.SIZE[0], min(W, CROP.SIZE[1])]
-_C.INPUT.CROP.TYPE = "relative_range"
-# Size of crop in range (0, 1] if CROP.TYPE is "relative" or "relative_range" and in number of
-# pixels if CROP.TYPE is "absolute"
-_C.INPUT.CROP.SIZE = [0.9, 0.9]
+_C.INPUT.USE_HEIGHT = True
 
 
 # -----------------------------------------------------------------------------
