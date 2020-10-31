@@ -31,6 +31,11 @@ _C.MODEL.WEIGHTS = ""
 # -----------------------------------------------------------------------------
 _C.INPUT = CN()
 _C.INPUT.USE_HEIGHT = True
+_C.INPUT.NUM_POINTS = 40000
+_C.INPUT.RANDOM_X_FLIP = 0.5
+_C.INPUT.RANDOM_Y_FLIP = 0.5
+_C.INPUT.RANDOM_Z_ROTATION = (-5, 5)
+_C.INPUT.RANDOM_SCALE = (0.85, 1.15)
 
 
 # -----------------------------------------------------------------------------
@@ -49,17 +54,11 @@ _C.DATASETS.TEST = ()
 _C.DATALOADER = CN()
 # Number of data loading threads
 _C.DATALOADER.NUM_WORKERS = 4
-# If True, each batch should contain only images for which the aspect ratio
-# is compatible. This groups portrait images together, and landscape images
-# are not batched with portrait images.
-_C.DATALOADER.ASPECT_RATIO_GROUPING = True
 # Options: TrainingSampler, RepeatFactorTrainingSampler
 _C.DATALOADER.SAMPLER_TRAIN = "TrainingSampler"
 # Repeat threshold for RepeatFactorTrainingSampler
 _C.DATALOADER.REPEAT_THRESHOLD = 0.0
-# Tf True, when working on datasets that have instance annotations, the
-# training dataloader will filter out images without associated annotations
-_C.DATALOADER.FILTER_EMPTY_ANNOTATIONS = True
+
 
 # ---------------------------------------------------------------------------- #
 # Backbone options

@@ -1,4 +1,3 @@
-from fvcore.transforms.transform import Transform, TransformList  # order them first
 from .transform import *
 from .augmentation import *
 from .augmentation_impl import *

@@ -108,28 +108,28 @@ class BoxMode(IntEnum):
 
 class Boxes:
     """
-    This structure stores a list of boxes as a Nx6 torch.Tensor.
+    This structure stores a list of boxes as a Nx7 torch.Tensor.
     It supports some common methods about boxes
     (`volume`, `clip`, `nonempty`, etc),
     and also behaves like a Tensor
     (support indexing, `to(device)`, `.device`, and iteration over all boxes)
 
     Attributes:
-        tensor (torch.Tensor): float matrix of Nx6. Each row is (x1, y1, z1, x2, y2, z2).
+        tensor (torch.Tensor): float matrix of Nx7. Each row is (xc, yc, zc, width, depth, height).
     """
 
     def __init__(self, tensor: torch.Tensor):
         """
         Args:
-            tensor (Tensor[float]): a Nx6 matrix.  Each row is (x1, y1, z1, x2, y2, z2).
+            tensor (Tensor[float]): a Nx7 matrix.  Each row is (xc, yc, zc, width, depth, height).
         """
         device = tensor.device if isinstance(tensor, torch.Tensor) else torch.device("cpu")
         tensor = torch.as_tensor(tensor, dtype=torch.float32, device=device)
         if tensor.numel() == 0:
             # Use reshape, so we don't end up creating a new tensor that does not depend on
             # the inputs (and consequently confuses jit)
-            tensor = tensor.reshape((0, 6)).to(dtype=torch.float32, device=device)
-        assert tensor.dim() == 2 and tensor.size(-1) == 6, tensor.size()
+            tensor = tensor.reshape((0, 7)).to(dtype=torch.float32, device=device)
+        assert tensor.dim() == 2 and tensor.size(-1) == 7, tensor.size()
 
         self.tensor = tensor
 

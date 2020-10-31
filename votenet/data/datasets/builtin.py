@@ -20,9 +20,9 @@ from .sunrgbd import register_sunrgbd_instances
 
 _PREDEFINED_SPLITS_SCANNET = {
     "scannet_v2": {
-        "scannet_v2/train": ("scannet/detection_data", "scannet/meta_data/scannetv2_train.txt"),
-        "scannet_v2/val": ("scannet/detection_data", "scannet/meta_data/scannetv2_val.txt"),
-        "scannet_v2/test": ("scannet/detection_data", "scannet/meta_data/scannetv2_test.txt"),
+        "scannet_v2/train": ("scannet/data", "scannet/meta_data/scannetv2_train.txt"),
+        "scannet_v2/val": ("scannet/data", "scannet/meta_data/scannetv2_val.txt"),
+        "scannet_v2/test": ("scannet/data", "scannet/meta_data/scannetv2_test.txt"),
     },
 }
 

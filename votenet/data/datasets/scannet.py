@@ -16,22 +16,18 @@ def register_scannet_instances(name, split_file, data_root):
 def load_scannet(split_file, data_root, name):
     split_file = PathManager.get_local_path(split_file)
 
-    all_scenes = set([
+    all_scans = set([
         os.path.basename(file_name)[:12]
         for file_name in os.listdir(data_root)
     ])
 
-    scenes = filter(lambda s: len(s) > 0 and s in all_scenes, split_file.split("\n"))
+    scans = filter(lambda s: len(s) > 0 and s in all_scans, split_file.split("\n"))
 
     dataset_dicts = [
         {
-            "type": "scannet",
-            "point_cloud": os.path.join(data_root, f"{prefix}_vert.npy"),
-            "bboxes": os.path.join(data_root, f"{prefix}_bbox.npy"),
-            "instance_labels": os.path.join(data_root, f"{prefix}_ins_label.npy"),
-            "semantic_labels": os.path.join(data_root, f"{prefix}_sem_label.npy"),
+            "path": os.path.join(data_root, f"{prefix}.npy"),
         }
-        for prefix in sorted(scenes)
+        for prefix in sorted(scans)
     ]
 
     return dataset_dicts

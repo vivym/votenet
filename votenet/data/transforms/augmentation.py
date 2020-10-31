@@ -3,7 +3,8 @@ import pprint
 from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
-from fvcore.transforms.transform import Transform, TransformList
+
+from .transform import Transform, TransformList
 
 """
 See "Data Augmentation" tutorial for an overview of the system.
@@ -19,18 +20,6 @@ __all__ = [
     "StandardAugInput",
     "apply_augmentations",
 ]
-
-
-def _check_img_dtype(img):
-    assert isinstance(img, np.ndarray), "[Augmentation] Needs an numpy array, but got a {}!".format(
-        type(img)
-    )
-    assert not isinstance(img.dtype, np.integer) or (
-        img.dtype == np.uint8
-    ), "[Augmentation] Got image of type {}, use uint8 or floating points instead!".format(
-        img.dtype
-    )
-    assert img.ndim in [2, 3], img.ndim
 
 
 def _get_aug_input_args(aug, aug_input) -> List[Any]:
@@ -303,7 +292,7 @@ class AugInput:
     # TODO maybe should support more builtin data types here
     def __init__(
         self,
-        image: np.ndarray,
+        points: np.ndarray,
         *,
         boxes: Optional[np.ndarray] = None,
     ):
@@ -314,10 +303,8 @@ class AugInput:
                 to users.
             boxes (ndarray or None): Nx4 float32 boxes in XYXY_ABS mode
         """
-        _check_img_dtype(image)
-        self.image = image
+        self.points = points
         self.boxes = boxes
-        self.sem_seg = sem_seg
 
     def transform(self, tfm: Transform) -> None:
         """
@@ -326,11 +313,9 @@ class AugInput:
         By "in-place", it means after calling this method, accessing an attribute such
         as ``self.image`` will return transformed data.
         """
-        self.image = tfm.apply_image(self.image)
+        self.points = tfm.apply_points(self.points)
         if self.boxes is not None:
             self.boxes = tfm.apply_box(self.boxes)
-        if self.sem_seg is not None:
-            self.sem_seg = tfm.apply_segmentation(self.sem_seg)
 
     def apply_augmentations(
         self, augmentations: List[Union[Augmentation, Transform]]

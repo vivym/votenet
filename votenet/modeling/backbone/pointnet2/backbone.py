@@ -12,15 +12,9 @@ class PointNet2(Backbone):
     r"""
        Backbone network for point cloud feature learning.
        Based on Pointnet++ single-scale grouping network.
-
-       Parameters
-       ----------
-       input_feature_dim: int
-            Number of input channels in the feature descriptor for each point.
-            e.g. 3 for RGB.
     """
 
-    def __init__(self, input_feature_dim):
+    def __init__(self, cfg):
         super().__init__()
 
         self.sa1 = PointnetSAModuleVotes(
