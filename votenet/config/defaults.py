@@ -30,12 +30,14 @@ _C.MODEL.WEIGHTS = ""
 # INPUT
 # -----------------------------------------------------------------------------
 _C.INPUT = CN()
+_C.INPUT.USE_COLOR = False
 _C.INPUT.USE_HEIGHT = True
 _C.INPUT.NUM_POINTS = 40000
 _C.INPUT.RANDOM_X_FLIP = 0.5
 _C.INPUT.RANDOM_Y_FLIP = 0.5
 _C.INPUT.RANDOM_Z_ROTATION = (-5, 5)
 _C.INPUT.RANDOM_SCALE = (0.85, 1.15)
+_C.INPUT.AXIS_ALIGNED_BOX = False
 
 
 # -----------------------------------------------------------------------------
@@ -65,39 +67,62 @@ _C.DATALOADER.REPEAT_THRESHOLD = 0.0
 # ---------------------------------------------------------------------------- #
 _C.MODEL.BACKBONE = CN()
 
-_C.MODEL.BACKBONE.NAME = "build_resnet_backbone"
+_C.MODEL.BACKBONE.NAME = "build_pointnet2_backbone"
 # Freeze the first several stages so they are not trained.
 # There are 5 stages in ResNet. The first is a convolution, and the following
 # stages are each group of residual blocks.
-_C.MODEL.BACKBONE.FREEZE_AT = 2
+_C.MODEL.BACKBONE.FREEZE_AT = -1
 
 
 # ---------------------------------------------------------------------------- #
-# FPN options
+# RPN options
 # ---------------------------------------------------------------------------- #
-_C.MODEL.FPN = CN()
-# Names of the input feature maps to be used by FPN
-# They must have contiguous power of 2 strides
-# e.g., ["res2", "res3", "res4", "res5"]
-_C.MODEL.FPN.IN_FEATURES = []
-_C.MODEL.FPN.OUT_CHANNELS = 256
-
-# Options: "" (no norm), "GN"
-_C.MODEL.FPN.NORM = ""
-
-# Types for fusing the FPN top-down and lateral features. Can be either "sum" or "avg"
-_C.MODEL.FPN.FUSE_TYPE = "sum"
+_C.MODEL.RPN = CN()
+_C.MODEL.RPN.HEAD_NAME = "StandardRPNHead"  # used by RPN_HEAD_REGISTRY
+_C.MODEL.RPN.CENTERNESS = True
 
 
 # ---------------------------------------------------------------------------- #
-# Proposal generator options
+# ROI HEADS options
 # ---------------------------------------------------------------------------- #
-_C.MODEL.PROPOSAL_GENERATOR = CN()
-# Current proposal generators include "RPN", "RRPN" and "PrecomputedProposals"
-_C.MODEL.PROPOSAL_GENERATOR.NAME = "RPN"
-# Proposal height and width both need to be greater than MIN_SIZE
-# (a the scale used during training or inference)
-_C.MODEL.PROPOSAL_GENERATOR.MIN_SIZE = 0
+_C.MODEL.ROI_HEADS = CN()
+_C.MODEL.ROI_HEADS.NAME = "StandardROIHeads"
+# Number of foreground classes
+_C.MODEL.ROI_HEADS.NUM_CLASSES = 18
+_C.MODEL.ROI_HEADS.CENTERNESS = True
+
+
+# ---------------------------------------------------------------------------- #
+# Voting Module
+# ---------------------------------------------------------------------------- #
+_C.MODEL.VOTING_MODULE = CN()
+_C.MODEL.VOTING_MODULE.VOTE_FACTOR = 1
+_C.MODEL.VOTING_MODULE.SEED_FEATURE_DIM = 256
+
+
+# ---------------------------------------------------------------------------- #
+# Voting Aggregation Module
+# ---------------------------------------------------------------------------- #
+_C.MODEL.VOTE_AGG = CN()
+_C.MODEL.VOTE_AGG.NUM_PROPOSALS = 128
+_C.MODEL.VOTE_AGG.SAMPLING_STRATEGY = "vote_fps"
+
+
+# ---------------------------------------------------------------------------- #
+# BOX_PROPOSAL_0
+# ---------------------------------------------------------------------------- #
+_C.MODEL.BOX_PROPOSAL_0 = CN()
+_C.MODEL.BOX_PROPOSAL_0.NUM_HEADING_BIN = 1
+_C.MODEL.BOX_PROPOSAL_0.GRID_SIZE = 3
+_C.MODEL.BOX_PROPOSAL_0.USE_EXP = True
+
+
+# ---------------------------------------------------------------------------- #
+# BOX_PROPOSAL_1
+# ---------------------------------------------------------------------------- #
+_C.MODEL.BOX_PROPOSAL_1 = CN()
+_C.MODEL.BOX_PROPOSAL_1.NUM_CLASSES = 18
+_C.MODEL.BOX_PROPOSAL_1.USE_CENTERNESS = False
 
 
 # ---------------------------------------------------------------------------- #
@@ -165,6 +190,7 @@ _C.SOLVER.CLIP_GRADIENTS.CLIP_VALUE = 1.0
 # gradient clipping type; for L-inf, please specify .inf
 _C.SOLVER.CLIP_GRADIENTS.NORM_TYPE = 2.0
 
+
 # ---------------------------------------------------------------------------- #
 # Specific test options
 # ---------------------------------------------------------------------------- #
@@ -175,6 +201,7 @@ _C.TEST.EVAL_PERIOD = 0
 
 _C.TEST.PRECISE_BN = CN({"ENABLED": False})
 _C.TEST.PRECISE_BN.NUM_ITER = 200
+
 
 # ---------------------------------------------------------------------------- #
 # Misc options
@@ -194,6 +221,7 @@ _C.CUDNN_BENCHMARK = False
 # The period (in terms of steps) for minibatch visualization at train time.
 # Set to 0 to disable.
 _C.VIS_PERIOD = 0
+
 
 # global config is for quick hack purposes.
 # You can set them in command line or config files,

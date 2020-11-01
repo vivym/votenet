@@ -108,13 +108,21 @@ class DatasetMapper:
 
         point_votes = transforms.apply_points(point_votes)
 
+        if point_votes.shape[1] == 3:
+            point_votes = np.tile(point_votes, (1, 3))
+
         instances = Instances()
         instances.gt_boxes = Boxes(torch.as_tensor(gt_boxes))
         instances.gt_classes = torch.as_tensor(gt_classes)
 
+        if self.use_height:
+            floor_height = np.percentile(points[:, 2], 0.99)
+            height = points[:, 2] - floor_height
+            points = np.concatenate([points, np.expand_dims(height, 1)], 1)
+
         return {
-            "points": points,
-            "point_votes": point_votes,
-            "point_votes_mask": point_votes_mask,
+            "points": torch.as_tensor(points),
+            "point_votes": torch.as_tensor(point_votes),
+            "point_votes_mask": torch.as_tensor(point_votes_mask),
             "instances": instances,
         }

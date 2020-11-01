@@ -7,14 +7,13 @@ from .pointnet2 import PointnetSAModuleVotes, PointnetFPModule
 __all__ = ["PointNet2"]
 
 
-@BACKBONE_REGISTRY.register()
 class PointNet2(Backbone):
     r"""
        Backbone network for point cloud feature learning.
        Based on Pointnet++ single-scale grouping network.
     """
 
-    def __init__(self, cfg):
+    def __init__(self, input_feature_dim):
         super().__init__()
 
         self.sa1 = PointnetSAModuleVotes(
@@ -65,13 +64,13 @@ class PointNet2(Backbone):
 
         return xyz, features
 
-    def forward(self, pointcloud: torch.cuda.FloatTensor, end_points=None):
+    def forward(self, points: torch.Tensor):
         r"""
             Forward pass of the network
 
             Parameters
             ----------
-            pointcloud: Variable(torch.cuda.FloatTensor)
+            points: torch.Tensor
                 (B, N, 3 + input_feature_dim) tensor
                 Point cloud to run predicts on
                 Each point in the point-cloud MUST
@@ -84,36 +83,61 @@ class PointNet2(Backbone):
                 XXX_features: float32 Tensor of shape (B,K,D)
                 XXX-inds: int64 Tensor of shape (B,K) values in [0,N-1]
         """
-        if not end_points: end_points = {}
-        batch_size = pointcloud.shape[0]
+        batch_size = points.size(0)
 
-        xyz, features = self._break_up_pc(pointcloud)
+        xyz, features = self._break_up_pc(points)
+
+        outputs = {}
 
         # --------- 4 SET ABSTRACTION LAYERS ---------
         xyz, features, fps_inds = self.sa1(xyz, features)
-        end_points['sa1_inds'] = fps_inds
-        end_points['sa1_xyz'] = xyz
-        end_points['sa1_features'] = features
+        outputs["sa1"] = {
+            "xyz": xyz,
+            "features": features,
+            "inds": fps_inds,
+        }
 
-        xyz, features, fps_inds = self.sa2(xyz, features)  # this fps_inds is just 0,1,...,1023
-        end_points['sa2_inds'] = fps_inds
-        end_points['sa2_xyz'] = xyz
-        end_points['sa2_features'] = features
+        xyz, features, fps_inds = self.sa2(xyz, features)
+        outputs["sa2"] = {
+            "xyz": xyz,
+            "features": features,
+            "inds": fps_inds,
+        }
 
-        xyz, features, fps_inds = self.sa3(xyz, features)  # this fps_inds is just 0,1,...,511
-        end_points['sa3_xyz'] = xyz
-        end_points['sa3_features'] = features
+        xyz, features, fps_inds = self.sa3(xyz, features)
+        outputs["sa3"] = {
+            "xyz": xyz,
+            "features": features,
+        }
 
-        xyz, features, fps_inds = self.sa4(xyz, features)  # this fps_inds is just 0,1,...,255
-        end_points['sa4_xyz'] = xyz
-        end_points['sa4_features'] = features
+        xyz, features, fps_inds = self.sa4(xyz, features)
+        outputs["sa4"] = {
+            "xyz": xyz,
+            "features": features,
+        }
 
         # --------- 2 FEATURE UPSAMPLING LAYERS --------
-        features = self.fp1(end_points['sa3_xyz'], end_points['sa4_xyz'], end_points['sa3_features'],
-                            end_points['sa4_features'])
-        features = self.fp2(end_points['sa2_xyz'], end_points['sa3_xyz'], end_points['sa2_features'], features)
-        end_points['fp2_features'] = features
-        end_points['fp2_xyz'] = end_points['sa2_xyz']
-        num_seed = end_points['fp2_xyz'].shape[1]
-        end_points['fp2_inds'] = end_points['sa1_inds'][:, 0:num_seed]  # indices among the entire input point clouds
-        return end_points
+        features = self.fp1(
+            outputs["sa3"]["xyz"], outputs["sa4"]["xyz"],
+            outputs["sa3"]["features"], outputs["sa4"]["features"],
+        )
+        features = self.fp2(
+            outputs["sa2"]["xyz"], outputs["sa3"]["xyz"],
+            outputs["sa2"]["features"], features,
+        )
+        num_seed = outputs["sa2"]["xyz"].size(1)
+        outputs["fp2"] = {
+            "xyz": outputs["sa2"]["xyz"],
+            "features": features,
+            "inds": outputs["sa1"]["inds"][:, :num_seed]
+        }
+
+        return outputs
+
+
+@BACKBONE_REGISTRY.register()
+def build_pointnet2_backbone(cfg):
+    use_color = cfg.INPUT.USE_COLOR
+    use_height = cfg.INPUT.USE_HEIGHT
+
+    return PointNet2(int(use_color) * 3 + int(use_height) * 1)

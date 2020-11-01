@@ -285,3 +285,48 @@ class PointnetFPModule(nn.Module):
         new_features = self.mlp(new_features)
 
         return new_features.squeeze(-1)
+
+
+class PointnetSAMoudleAgg(nn.Module):
+    def __init__(
+            self,
+            mlp: List[int],
+            radius: float,
+            nsample: int,
+            use_xyz: bool = True,
+            normalize_xyz: bool = True,
+            bn: bool = True,
+            pooling: str = 'max',
+    ):
+        super().__init__()
+        self.radius = radius
+        self.pooling = pooling
+        self.grouper = QueryAndGroup(
+            radius, nsample, use_xyz=use_xyz, normalize_xyz=normalize_xyz, ret_grouped_xyz=True
+        )
+        mlp_spec = mlp
+        if use_xyz and len(mlp_spec) > 0:
+            mlp_spec[0] += 3
+        self.mlp_module = SharedMLP(mlp_spec, bn=bn)
+
+    def forward(self, xyz, new_xyz, features):
+        # (B, C, npoint, nsample)
+        # (B, 3, npoint, nsample)
+        grouped_features, grouped_xyz = self.grouper(
+            xyz, new_xyz, features
+        )
+
+        # (B, mlp[-1], npoint, nsample)
+        new_features = self.mlp_module(
+            grouped_features
+        )
+
+        if self.pooling == 'max':
+            new_features = F.max_pool2d(
+                new_features, kernel_size=[1, new_features.size(3)]
+            )  # (B, mlp[-1], npoint, 1)
+        else:
+            raise NotImplementedError
+
+        new_features = new_features.squeeze(-1)  # (B, mlp[-1], npoint)
+        return new_features
