@@ -19,7 +19,7 @@ _C = CN()
 _C.MODEL = CN()
 _C.MODEL.MASK_ON = False
 _C.MODEL.DEVICE = "cuda"
-_C.MODEL.META_ARCHITECTURE = "VoteNet"
+_C.MODEL.META_ARCHITECTURE = "GeneralizedVoteNet"
 
 # Path (a file path, or URL like https://..) to a checkpoint file
 # to be loaded to the model. You can find available models in the model zoo.
@@ -75,6 +75,26 @@ _C.MODEL.BACKBONE.FREEZE_AT = -1
 
 
 # ---------------------------------------------------------------------------- #
+# Vote generator options
+# ---------------------------------------------------------------------------- #
+_C.MODEL.VOTE_GENERATOR = CN()
+_C.MODEL.VOTE_GENERATOR.NAME = "StandardVoteGenerator"
+
+_C.MODEL.VOTE_GENERATOR.VOTE_FACTOR = 1
+_C.MODEL.VOTE_GENERATOR.SEED_FEATURE_DIM = 256
+_C.MODEL.VOTE_GENERATOR.NUM_PROPOSALS = 128
+_C.MODEL.VOTE_GENERATOR.SAMPLING_STRATEGY = "vote_fps"
+
+
+# ---------------------------------------------------------------------------- #
+# Proposal generator options
+# ---------------------------------------------------------------------------- #
+_C.MODEL.PROPOSAL_GENERATOR = CN()
+# Current proposal generators include "VotingRPN" and "PrecomputedProposals"
+_C.MODEL.PROPOSAL_GENERATOR.NAME = "VotingRPN"
+
+
+# ---------------------------------------------------------------------------- #
 # RPN options
 # ---------------------------------------------------------------------------- #
 _C.MODEL.RPN = CN()
@@ -90,39 +110,16 @@ _C.MODEL.ROI_HEADS.NAME = "StandardROIHeads"
 # Number of foreground classes
 _C.MODEL.ROI_HEADS.NUM_CLASSES = 18
 _C.MODEL.ROI_HEADS.CENTERNESS = True
+_C.MODEL.ROI_HEADS.SEED_FEATURE_DIM = 256
+_C.MODEL.ROI_HEADS.GRID_SIZE = 3
+_C.MODEL.ROI_HEADS.USE_EXP = True
 
 
 # ---------------------------------------------------------------------------- #
-# Voting Module
+# Box Head
 # ---------------------------------------------------------------------------- #
-_C.MODEL.VOTING_MODULE = CN()
-_C.MODEL.VOTING_MODULE.VOTE_FACTOR = 1
-_C.MODEL.VOTING_MODULE.SEED_FEATURE_DIM = 256
-
-
-# ---------------------------------------------------------------------------- #
-# Voting Aggregation Module
-# ---------------------------------------------------------------------------- #
-_C.MODEL.VOTE_AGG = CN()
-_C.MODEL.VOTE_AGG.NUM_PROPOSALS = 128
-_C.MODEL.VOTE_AGG.SAMPLING_STRATEGY = "vote_fps"
-
-
-# ---------------------------------------------------------------------------- #
-# BOX_PROPOSAL_0
-# ---------------------------------------------------------------------------- #
-_C.MODEL.BOX_PROPOSAL_0 = CN()
-_C.MODEL.BOX_PROPOSAL_0.NUM_HEADING_BIN = 1
-_C.MODEL.BOX_PROPOSAL_0.GRID_SIZE = 3
-_C.MODEL.BOX_PROPOSAL_0.USE_EXP = True
-
-
-# ---------------------------------------------------------------------------- #
-# BOX_PROPOSAL_1
-# ---------------------------------------------------------------------------- #
-_C.MODEL.BOX_PROPOSAL_1 = CN()
-_C.MODEL.BOX_PROPOSAL_1.NUM_CLASSES = 18
-_C.MODEL.BOX_PROPOSAL_1.USE_CENTERNESS = False
+_C.MODEL.ROI_BOX_HEAD = CN()
+_C.MODEL.ROI_BOX_HEAD.NAME = "StandardBoxHead"
 
 
 # ---------------------------------------------------------------------------- #
@@ -195,6 +192,10 @@ _C.SOLVER.CLIP_GRADIENTS.NORM_TYPE = 2.0
 # Specific test options
 # ---------------------------------------------------------------------------- #
 _C.TEST = CN()
+# For end-to-end tests to verify the expected accuracy.
+# Each item is [task, metric, value, tolerance]
+# e.g.: [['bbox', 'AP', 38.5, 0.2]]
+_C.TEST.EXPECTED_RESULTS = []
 # The period (in terms of steps) to evaluate the model during training.
 # Set to 0 to disable.
 _C.TEST.EVAL_PERIOD = 0

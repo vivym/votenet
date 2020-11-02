@@ -286,6 +286,9 @@ class TransformList(Transform):
     def apply_points(self, x):
         raise NotImplementedError
 
+    def apply_box(self, x):
+        raise NotImplementedError
+
 
 class NoOpTransform(Transform):
     """

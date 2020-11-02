@@ -56,7 +56,7 @@ class PointNet2(Backbone):
         self.fp2 = PointnetFPModule(mlp=[256 + 256, 256, 256])
 
     def _break_up_pc(self, pc):
-        xyz = pc[..., 0:3].contiguous()
+        xyz = pc[..., :3].contiguous()
         features = (
             pc[..., 3:].transpose(1, 2).contiguous()
             if pc.size(-1) > 3 else None
@@ -83,8 +83,6 @@ class PointNet2(Backbone):
                 XXX_features: float32 Tensor of shape (B,K,D)
                 XXX-inds: int64 Tensor of shape (B,K) values in [0,N-1]
         """
-        batch_size = points.size(0)
-
         xyz, features = self._break_up_pc(points)
 
         outputs = {}

@@ -38,7 +38,7 @@ class StandardRPNHead(nn.Module):
         self.predictor = nn.Conv1d(128, out_channels, kernel_size=1)
 
     @classmethod
-    def from_config(cls, cfg, input_shape):
+    def from_config(cls, cfg):
         return {
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
             "use_centerness": cfg.MODEL.RPN.CENTERNESS,

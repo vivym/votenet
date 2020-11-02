@@ -29,11 +29,11 @@ def _get_aug_input_args(aug, aug_input) -> List[Any]:
     if aug.input_args is None:
         # Decide what attributes are needed automatically
         prms = list(inspect.signature(aug.get_transform).parameters.items())
-        # The default behavior is: if there is one parameter, then its "image"
+        # The default behavior is: if there is one parameter, then its "points"
         # (work automatically for majority of use cases, and also avoid BC breaking),
         # Otherwise, use the argument names.
         if len(prms) == 1:
-            names = ("image",)
+            names = ("points",)
         else:
             names = []
             for name, prm in prms:

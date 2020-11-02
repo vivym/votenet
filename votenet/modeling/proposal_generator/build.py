@@ -8,10 +8,8 @@ The registered object will be called with `obj(cfg, input_shape)`.
 The call should return a `nn.Module` object.
 """
 
-from . import rrpn  # noqa F401 isort:skip
 
-
-def build_proposal_generator(cfg, input_shape):
+def build_proposal_generator(cfg):
     """
     Build a proposal generator from `cfg.MODEL.PROPOSAL_GENERATOR.NAME`.
     The name can be "PrecomputedProposals" to use no proposal generator.
@@ -20,4 +18,4 @@ def build_proposal_generator(cfg, input_shape):
     if name == "PrecomputedProposals":
         return None
 
-    return PROPOSAL_GENERATOR_REGISTRY.get(name)(cfg, input_shape)
+    return PROPOSAL_GENERATOR_REGISTRY.get(name)(cfg)

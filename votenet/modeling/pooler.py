@@ -1,7 +1,10 @@
+from typing import List
+
 import torch
 from torch import nn
 
 from votenet.modeling.backbone import PointnetSAMoudleAgg
+from votenet.structures import Instances
 
 
 class ROIGridPooler(nn.Module):
@@ -27,22 +30,22 @@ class ROIGridPooler(nn.Module):
         # Reduce feature dim
         self.reduce_dim = torch.nn.Conv1d(self.num_key_points * 32, 128, 1)
 
-    def forward(self, features, proposals):
+    def forward(self, seed_xyz: torch.Tensor, seed_features: torch.Tensor, proposals: List[Instances]):
         batch_size = len(proposals)
         num_proposals = proposals[0].pred_origins.size(0)
 
         pred_origins = torch.stack([x.pred_origins for x in proposals])
-        pred_box_deltas = torch.stack([x.pred_box_deltas for x in proposals])
+        pred_box_reg = torch.stack([x.pred_box_reg for x in proposals])
         pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
 
         # (bs, num_proposal, num_key_points, 3)
         key_points = get_global_grid_points_of_rois(
-            pred_origins, pred_box_deltas, pred_heading_angles, grid_size=self.grid_size
+            pred_origins, pred_box_reg, pred_heading_angles, grid_size=self.grid_size
         )
         # (bs, num_proposal * num_key_points, 3)
         key_points = key_points.view(batch_size, -1, 3)
 
-        features = self.seed_aggregation(features, key_points, features)
+        features = self.seed_aggregation(seed_xyz, key_points, seed_features)
         # (bs, mlp[-1], num_proposal, num_key_points)
         features = features.view(batch_size, -1, num_proposals, self.num_key_points)
         # (bs, mlp[-1], num_key_points, num_proposal)

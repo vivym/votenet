@@ -32,6 +32,7 @@ class DatasetMapper:
         is_train: bool,
         *,
         augmentations: List[Union[T.Augmentation, T.Transform]],
+        use_color: bool,
         use_height: bool,
         num_points: int,
     ):
@@ -46,6 +47,7 @@ class DatasetMapper:
         # fmt: off
         self.is_train       = is_train
         self.augmentations  = T.AugmentationList(augmentations)
+        self.use_color      = use_color
         self.use_height     = use_height
         self.num_points     = num_points
         # fmt: on
@@ -61,18 +63,19 @@ class DatasetMapper:
 
         augs = []
         if is_train:
-            if random_x_flip > 0.5:
+            if random_x_flip > 0:
                 augs.append(T.RandomXFlip(prob=random_x_flip))
-            if cfg.INPUT.USE_RANDOM_Y_FLIP:
+            if random_y_flip > 0:
                 augs.append(T.RandomYFlip(prob=random_y_flip))
             if random_z_rotation is not None:
                 augs.append(T.RandomZRotation(angle=random_z_rotation, sample_style="range"))
             if random_scale is not None:
-                augs.append(T.RandomScale(scale_factor=random_z_rotation, sample_style="range"))
+                augs.append(T.RandomScale(scale_factor=random_scale, sample_style="range"))
 
         ret = {
             "is_train": is_train,
             "augmentations": augs,
+            "use_color": cfg.INPUT.USE_COLOR,
             "use_height": cfg.INPUT.USE_HEIGHT,
             "num_points": cfg.INPUT.NUM_POINTS,
         }
@@ -89,9 +92,14 @@ class DatasetMapper:
         dataset_dict = np.load(dataset_dict["path"])
         points = dataset_dict["points"]
         point_votes = dataset_dict["point_votes"]
-        point_votes_mask = dataset_dict["dataset_dict"]
+        point_votes_mask = dataset_dict["point_votes_mask"]
         gt_boxes = dataset_dict["gt_boxes"]
         gt_classes = dataset_dict["gt_classes"]
+
+        if self.use_color:
+            points = points[:, :6]
+        else:
+            points = points[:, :3]
 
         # Random point sampling
         choice = np.random.choice(

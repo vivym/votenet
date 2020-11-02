@@ -14,8 +14,11 @@ def nn_distance(pc1, pc2, dist="l1"):
     """
     assert pc1.dim() == pc2.dim()
     if pc1.dim() == 2:
+        need_squeeze = True
         pc1 = pc1.unsqueeze(0)
         pc2 = pc2.unsqueeze(0)
+    else:
+        need_squeeze = False
 
     n = pc1.shape[1]
     m = pc2.shape[1]
@@ -33,5 +36,11 @@ def nn_distance(pc1, pc2, dist="l1"):
 
     dist1, idx1 = torch.min(pc_dist, dim=2)  # (B,N)
     dist2, idx2 = torch.min(pc_dist, dim=1)  # (B,M)
+
+    if need_squeeze:
+        dist1.squeeze_(0)
+        idx1.squeeze_(0)
+        dist2.squeeze_(0)
+        idx2.squeeze_(0)
 
     return dist1, idx1, dist2, idx2

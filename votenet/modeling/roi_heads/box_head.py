@@ -11,12 +11,12 @@ The registered object will be called with `obj(cfg, input_shape)`.
 """
 
 
-def build_box_head(cfg, input_shape):
+def build_box_head(cfg):
     """
     Build a box head defined by `cfg.MODEL.ROI_BOX_HEAD.NAME`.
     """
     name = cfg.MODEL.ROI_BOX_HEAD.NAME
-    return ROI_BOX_HEAD_REGISTRY.get(name)(cfg, input_shape)
+    return ROI_BOX_HEAD_REGISTRY.get(name)(cfg)
 
 
 @ROI_BOX_HEAD_REGISTRY.register()
@@ -41,16 +41,16 @@ class StandardBoxHead(nn.Module):
             nn.BatchNorm1d(128),
         )
 
-        out_channels = 1 + num_classes + 6 * num_classes
+        out_channels = 1 + num_classes + num_classes * 6
         if not use_axis_aligned_box:
-            out_channels += 1 * num_classes
+            out_channels += num_classes * 1
         if use_centerness:
             out_channels += 1
 
         self.predictor = nn.Conv1d(128, out_channels, kernel_size=1)
 
     @classmethod
-    def from_config(cls, cfg, input_shape):
+    def from_config(cls, cfg):
         return {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
@@ -58,17 +58,20 @@ class StandardBoxHead(nn.Module):
         }
 
     def forward(self, x):
+        batch_size = x.size(0)
+        num_proposals = x.size(-1)
+
         x = self.convs(x)
         x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
         pred_cls_logits = x[:, :, :self.num_classes + 1] # (bs, num_proposals, num_classes + 1)
         idx = self.num_classes + 1
-        pred_box_deltas = x[:, :, idx:idx + 6 * self.num_classes]
+        pred_box_deltas = x[:, :, idx:idx + self.num_classes * 6].view(batch_size, num_proposals, self.num_classes, 6)
         idx += 6 * self.num_classes
 
         pred_heading_deltas = None
         if not self.use_axis_aligned_box:
-            pred_heading_deltas = x[:, :, idx:idx + 1 * self.num_classes]
+            pred_heading_deltas = x[:, :, idx:idx + self.num_classes * 1]
             idx += 1 * self.num_classes
 
         pred_centerness = None
