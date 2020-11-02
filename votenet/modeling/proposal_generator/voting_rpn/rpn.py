@@ -105,11 +105,12 @@ class VotingRPN(nn.Module):
         for i, (pred_objectness_i, pred_origins_i, pred_box_reg_i, pred_heading_angles_i) in enumerate(zip(
                 pred_objectness, proposal_xyz, pred_box_reg, pred_heading_angles
         )):
+            # TODO: detach or not
             instances = Instances()
-            instances.pred_objectness = pred_objectness_i
-            instances.pred_origins = pred_origins_i
-            instances.pred_box_reg = pred_box_reg_i
-            instances.pred_heading_angles = pred_heading_angles_i
+            instances.pred_objectness = pred_objectness_i.detach()
+            instances.pred_origins = pred_origins_i.detach()
+            instances.pred_box_reg = pred_box_reg_i.detach()
+            instances.pred_heading_angles = pred_heading_angles_i.detach()
 
             if gt_classes is not None:
                 instances.gt_classes = gt_classes[i]

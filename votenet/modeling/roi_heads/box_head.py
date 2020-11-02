@@ -47,7 +47,12 @@ class StandardBoxHead(nn.Module):
         if use_centerness:
             out_channels += 1
 
-        self.predictor = nn.Conv1d(128, out_channels, kernel_size=1)
+        self.cls_predictor = nn.Conv1d(128, num_classes + 1, kernel_size=1)
+        self.box_predictor = nn.Conv1d(128, (num_classes + 1) * 6, kernel_size=1)
+        if not use_axis_aligned_box:
+            self.box_angle_predictor = nn.Conv1d(128, (num_classes + 1) * 6, kernel_size=1)
+        if use_centerness:
+            self.centerness_predictor = nn.Conv1d(128, 1, kernel_size=1)
 
     @classmethod
     def from_config(cls, cfg):
@@ -62,22 +67,19 @@ class StandardBoxHead(nn.Module):
         num_proposals = x.size(-1)
 
         x = self.convs(x)
-        x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
+        # x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
-        pred_cls_logits = x[:, :, :self.num_classes + 1] # (bs, num_proposals, num_classes + 1)
-        idx = self.num_classes + 1
-        pred_box_deltas = x[:, :, idx:idx + (self.num_classes + 1) * 6].view(
+        pred_cls_logits = self.cls_predictor(x)
+        pred_box_deltas = self.box_predictor(x).permute(0, 2, 1).view(
             batch_size, num_proposals, self.num_classes + 1, 6
         )
-        idx += (self.num_classes + 1) * 6
 
         pred_heading_deltas = None
         if not self.use_axis_aligned_box:
-            pred_heading_deltas = x[:, :, idx:idx + (self.num_classes + 1) * 1]
-            idx += (self.num_classes + 1) * 1
+            pred_heading_deltas = self.box_angle_predictor(x).permute(0, 2, 1)
 
         pred_centerness = None
         if self.use_centerness:
-            pred_centerness = x[:, :, idx]
+            pred_centerness = self.centerness_predictor(x).permute(0, 2, 1)
 
         return pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness

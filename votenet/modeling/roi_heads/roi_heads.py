@@ -107,6 +107,7 @@ class StandardROIHeads(nn.Module):
         device = pred_cls_logits.device
         batch_size = pred_cls_logits.size(0)
 
+        # TODO: gather
         pred_scores, pred_classes = pred_cls_logits.sigmoid().max(dim=2)
 
         batch_inds = torch.arange(0, batch_size, dtype=torch.int64, device=device)
@@ -143,7 +144,7 @@ class StandardROIHeads(nn.Module):
             proposals: List[Instances],
     ):
         batch_size = pred_cls_logits.size(0)
-        num_proposals = pred_cls_logits.size(1)
+        num_proposals = pred_cls_logits.size(-1)
         normalizer = batch_size * num_proposals
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
@@ -151,14 +152,12 @@ class StandardROIHeads(nn.Module):
         gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])
 
         losses = {}
-
         losses["loss_cls"] = F.cross_entropy(
-            pred_cls_logits.permute(0, 2, 1),
+            pred_cls_logits,
             gt_classes,
             reduction="sum",
         ) / normalizer
 
-        # pred_box_deltas = pred_box_deltas[gt_classes < self.num_classes, :, :]
         fg_mask = gt_classes < self.num_classes
         pred_box_deltas = torch.gather(
             pred_box_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1, 1).repeat(1, 1, 1, 6)
