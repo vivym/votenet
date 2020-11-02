@@ -41,9 +41,9 @@ class StandardBoxHead(nn.Module):
             nn.BatchNorm1d(128),
         )
 
-        out_channels = 1 + num_classes + num_classes * 6
+        out_channels = (num_classes + 1) + (num_classes + 1) * 6
         if not use_axis_aligned_box:
-            out_channels += num_classes * 1
+            out_channels += (num_classes + 1) * 1
         if use_centerness:
             out_channels += 1
 
@@ -66,13 +66,15 @@ class StandardBoxHead(nn.Module):
 
         pred_cls_logits = x[:, :, :self.num_classes + 1] # (bs, num_proposals, num_classes + 1)
         idx = self.num_classes + 1
-        pred_box_deltas = x[:, :, idx:idx + self.num_classes * 6].view(batch_size, num_proposals, self.num_classes, 6)
-        idx += 6 * self.num_classes
+        pred_box_deltas = x[:, :, idx:idx + (self.num_classes + 1) * 6].view(
+            batch_size, num_proposals, self.num_classes + 1, 6
+        )
+        idx += (self.num_classes + 1) * 6
 
         pred_heading_deltas = None
         if not self.use_axis_aligned_box:
-            pred_heading_deltas = x[:, :, idx:idx + self.num_classes * 1]
-            idx += 1 * self.num_classes
+            pred_heading_deltas = x[:, :, idx:idx + (self.num_classes + 1) * 1]
+            idx += (self.num_classes + 1) * 1
 
         pred_centerness = None
         if self.use_centerness:

@@ -98,7 +98,6 @@ class VotingRPN(nn.Module):
             pred_heading_deltas, dim=2, index=pred_heading_class.unsqueeze(-1)
         ).squeeze(-1)  # (bs, num_proposals)
 
-        print(pred_heading_class.size(), pred_heading_deltas.size())
         pred_heading_angles = pred_heading_class.float() * (2 * np.pi / 12) + pred_heading_deltas
         pred_heading_angles = pred_heading_angles % (2 * np.pi)
 

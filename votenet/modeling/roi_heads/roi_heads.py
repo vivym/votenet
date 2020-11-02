@@ -51,11 +51,13 @@ class StandardROIHeads(nn.Module):
     def __init__(
         self,
         *,
+        num_classes: int,
         pooler: nn.Module,
         box_head: nn.Module,
     ):
         super().__init__()
 
+        self.num_classes = num_classes
         self.pooler = pooler
         self.box_head = box_head
 
@@ -65,6 +67,7 @@ class StandardROIHeads(nn.Module):
         seed_feature_dim = cfg.MODEL.ROI_HEADS.SEED_FEATURE_DIM
 
         return {
+            "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "pooler": ROIGridPooler(grid_size, seed_feature_dim),
             "box_head": build_box_head(cfg),
         }
@@ -139,7 +142,6 @@ class StandardROIHeads(nn.Module):
             pred_heading_deltas: torch.Tensor,
             proposals: List[Instances],
     ):
-        device = pred_cls_logits.device
         batch_size = pred_cls_logits.size(0)
         num_proposals = pred_cls_logits.size(1)
         normalizer = batch_size * num_proposals
@@ -156,19 +158,25 @@ class StandardROIHeads(nn.Module):
             reduction="sum",
         ) / normalizer
 
-        batch_inds = torch.arange(0, batch_size * num_proposals, dtype=torch.int64, device=device)
-        print(gt_box_reg.size(), pred_box_deltas.size(), pred_box_deltas[batch_inds, gt_classes].size())
+        # pred_box_deltas = pred_box_deltas[gt_classes < self.num_classes, :, :]
+        fg_mask = gt_classes < self.num_classes
+        pred_box_deltas = torch.gather(
+            pred_box_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1, 1).repeat(1, 1, 1, 6)
+        ).view(batch_size, num_proposals, 6)
         # TODO: configurable
         losses["loss_box_reg"] = huber_loss(
-            pred_box_deltas[batch_inds, gt_classes],
-            gt_box_reg,
+            pred_box_deltas[fg_mask, :],
+            gt_box_reg[fg_mask, :],
             beta=0.15,
             reduction="sum",
         ) / normalizer
 
+        pred_heading_deltas = torch.gather(
+            pred_heading_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1)
+        ).view(batch_size, num_proposals)
         losses["loss_angle_reg"] = huber_loss(
-            pred_heading_deltas[batch_inds, gt_classes],
-            gt_heading_deltas,
+            pred_heading_deltas[fg_mask],
+            gt_heading_deltas[fg_mask],
             beta=1.0,
             reduction="sum",
         ) / normalizer

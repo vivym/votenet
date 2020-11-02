@@ -113,7 +113,7 @@ def get_dense_grid_points(rois, batch_size_rcnn, grid_size):
     :return:
     """
     faked_features = rois.new_ones((grid_size, grid_size, grid_size))  # alis gs for grid_size
-    dense_idx = faked_features.nonzero()  # (gs**3, 3) [x_idx, y_idx, z_idx]
+    dense_idx = faked_features.nonzero(as_tuple=False)  # (gs**3, 3) [x_idx, y_idx, z_idx]
     dense_idx = dense_idx.repeat(batch_size_rcnn, 1, 1).float()  # (batch_size_rcnn, gs**3, 3)
 
     rois_center = rois[:, :, 0:3].view(-1, 3)  # (batch_size_rcnn, 3)
