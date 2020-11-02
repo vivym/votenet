@@ -5,6 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
+from votenet.layers import huber_loss
 from votenet.utils.registry import Registry
 from votenet.structures import Instances
 
@@ -69,7 +70,6 @@ class StandardROIHeads(nn.Module):
             self,
             features: torch.Tensor,
             proposals: List[Instances],
-            gt_instances: Optional[List[Instances]] = None,
     ):
         pooled_features = self.pooler(features, proposals)
         # TODO: more fusion strategy
@@ -78,30 +78,93 @@ class StandardROIHeads(nn.Module):
         pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness = self.box_head(features)
 
         if self.training:
-            assert gt_instances is not None
             losses = self.losses(
-                pred_cls_logits, pred_box_deltas, pred_heading_deltas, gt_instances
+                pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
             )
-            return proposals, losses
+            return None, losses
         else:
-            pred_instances = None
+            pred_instances = self.predict_instances(
+                pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
+            )
             return pred_instances, {}
+
+    @torch.no_grad()
+    def predict_instances(
+            self,
+            pred_cls_logits: torch.Tensor,
+            pred_box_deltas: torch.Tensor,
+            pred_heading_deltas: torch.Tensor,
+            proposals: torch.Tensor,
+    ):
+        device = pred_cls_logits.device
+        batch_size = pred_cls_logits.size(0)
+
+        pred_scores, pred_classes = pred_cls_logits.sigmoid().max(dim=2)
+
+        batch_inds = torch.arange(0, batch_size, dtype=torch.int64, device=device)
+
+        pred_box_reg = torch.stack([x.pred_box_reg for x in proposals])
+        pred_box_reg += pred_box_deltas[batch_inds, pred_classes]
+        pred_origins = torch.stack([x.pred_origins for x in proposals])
+        p1 = pred_origins - pred_box_reg[:, :, :3]
+        p2 = pred_origins + pred_box_reg[:, :, 3:]
+
+        pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
+        pred_heading_angles += pred_heading_deltas[batch_inds, pred_classes]
+
+        pred_boxes = torch.cat([(p1 + p2) / 2., (p2 - p1), pred_heading_angles], dim=2)
+
+        instances = []
+        for pred_scores_i, pred_classes_i, pred_boxes_i in zip(
+                pred_scores, pred_classes, pred_boxes
+        ):
+            instances_i = Instances()
+            instances_i.pred_classes = pred_classes_i
+            instances_i.pred_scores = pred_scores_i
+            instances_i.pred_boxes = pred_boxes_i
+
+            instances.append(instances_i)
+
+        return instances
 
     def losses(
             self,
             pred_cls_logits: torch.Tensor,
             pred_box_deltas: torch.Tensor,
             pred_heading_deltas: torch.Tensor,
-            gt_instances: torch.Tensor,
+            proposals: torch.Tensor,
     ):
+        device = pred_cls_logits.device
         batch_size = pred_cls_logits.size(0)
         num_proposals = pred_cls_logits.size(1)
         normalizer = batch_size * num_proposals
 
-        gt_classes = torch.stack([x.gt_classes for x in gt_instances])
+        gt_classes = torch.stack([x.gt_classes for x in proposals])
+        gt_box_regs = torch.stack([x.gt_box_regs for x in proposals])
+        gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])
 
         losses = {}
 
-        losses["loss_cls"] = F.binary_cross_entropy_with_logits(
+        losses["loss_cls"] = F.cross_entropy(
+            pred_cls_logits,
+            gt_classes,
+            reduction="sum",
+        ) / normalizer
 
-        )
+        batch_inds = torch.arange(0, batch_size, dtype=torch.int64, device=device)
+        # TODO: configurable
+        losses["loss_box_reg"] = huber_loss(
+            pred_box_deltas[batch_inds, gt_classes],
+            gt_box_regs,
+            beta=0.15,
+            reduction="sum",
+        ) / normalizer
+
+        losses["loss_angle_reg"] = huber_loss(
+            pred_heading_deltas[batch_inds, gt_classes],
+            gt_heading_deltas,
+            beta=1.0,
+            reduction="sum",
+        ) / normalizer
+
+        return losses

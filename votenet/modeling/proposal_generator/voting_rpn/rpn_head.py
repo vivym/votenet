@@ -29,7 +29,7 @@ class StandardRPNHead(nn.Module):
             nn.BatchNorm1d(128),
         )
 
-        out_channels = 1 + 6  # objectness(1) + box_deltas(6)
+        out_channels = 1 + 6  # objectness(1) + box_reg(6)
         if not use_axis_aligned_box:
             out_channels += 12 * 2
         if use_centerness:
@@ -61,7 +61,7 @@ class StandardRPNHead(nn.Module):
         x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
         pred_objectness_logits = x[:, :, 0] # (bs, num_proposals)
-        pred_box_deltas = x[:, :, 1:7]
+        pred_box_reg = x[:, :, 1:7]
         idx = 7
 
         pred_heading_cls_logits, pred_heading_deltas = None, None
@@ -75,4 +75,4 @@ class StandardRPNHead(nn.Module):
         if self.use_centerness:
             pred_centerness = x[:, :, idx]
 
-        return pred_objectness_logits, pred_box_deltas, pred_heading_cls_logits, pred_heading_deltas, pred_centerness
+        return pred_objectness_logits, pred_box_reg, pred_heading_cls_logits, pred_heading_deltas, pred_centerness
