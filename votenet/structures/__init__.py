@@ -1,2 +1,2 @@
-from .boxes import Boxes
+from .boxes import Boxes, BoxMode
 from .instances import Instances

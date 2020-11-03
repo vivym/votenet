@@ -2,6 +2,8 @@ import os
 
 from fvcore.common.file_io import PathManager
 
+from votenet.structures import BoxMode
+
 from ..catalog import DatasetCatalog, MetadataCatalog
 
 
@@ -32,6 +34,7 @@ def load_scannet(split_file, data_root, name):
     dataset_dicts = [
         {
             "path": os.path.join(data_root, f"{prefix}.npz"),
+            "bbox_mode": BoxMode.XYZWDH_ABS,
         }
         for prefix in sorted(scans)
     ]

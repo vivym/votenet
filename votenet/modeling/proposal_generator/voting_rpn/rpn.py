@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
-from votenet.layers import ShapeSpec, nn_distance, huber_loss
+from votenet.layers import nn_distance, huber_loss
 from votenet.structures import Instances
 from votenet.utils.events import get_event_storage
 
@@ -54,21 +54,21 @@ class VotingRPN(nn.Module):
 
         if self.training:
             assert gt_instances is not None, "RPN requires gt_instances in training!"
-            gt_labels, gt_classes, gt_boxes, gt_box_reg = self.label_and_sample_proposals(voted_xyz, gt_instances)
+            gt_labels, gt_classes, gt_boxes = self.label_and_sample_proposals(voted_xyz, gt_instances)
             if pred_heading_cls_logits is not None:
+                assert gt_boxes.size(-1) == 7
                 gt_heading_classes, gt_heading_deltas = self.compute_gt_angles(gt_boxes)
             else:
                 gt_heading_classes, gt_heading_deltas = None, None
             losses = self.loss_instances(
                 pred_objectness_logits, gt_labels,
-                pred_box_reg, gt_box_reg,
+                pred_box_reg, gt_boxes,
                 pred_heading_cls_logits, pred_heading_deltas,
                 gt_heading_classes, gt_heading_deltas,
             )
         else:
             gt_classes = None
             gt_boxes = None
-            gt_box_reg = None
             gt_heading_deltas = None
             losses = {}
 
@@ -140,7 +140,7 @@ class VotingRPN(nn.Module):
     @torch.jit.unused
     def loss_instances(
             self, pred_objectness_logits: torch.Tensor, gt_labels: torch.Tensor,
-            pred_box_reg: torch.Tensor, gt_box_reg: torch.Tensor,
+            pred_box_reg: torch.Tensor, gt_boxes: torch.Tensor,
             pred_heading_cls_logits: Optional[torch.Tensor] = None,
             pred_heading_deltas: Optional[torch.Tensor] = None,
             gt_heading_classes: Optional[torch.Tensor] = None,
@@ -206,10 +206,9 @@ class VotingRPN(nn.Module):
         gt_labels = []
         gt_classes = []
         gt_boxes = []
-        gt_box_reg = []
         for (proposal_xyz_i, gt_instances_i) in zip(proposal_xyz, gt_instances):
             gt_classes_i = gt_instances_i.gt_classes
-            gt_centers_i = gt_instances_i.gt_boxes.tensor[:, :3]
+            gt_centers_i = gt_instances_i.gt_boxes.get_centers()
             gt_sizes_i = gt_instances_i.gt_boxes.tensor[:, 3:6]
 
             dists, inds, _, _ = nn_distance(proposal_xyz_i, gt_centers_i, dist="euclidean")
@@ -223,22 +222,12 @@ class VotingRPN(nn.Module):
 
             gt_boxes_i = gt_instances_i.gt_boxes.tensor[inds, :]
 
-            box_half_sizes = gt_boxes_i[:, 3:6] / 2.
-            box_centers = gt_boxes_i[:, :3]
-
-            gt_box_reg_i = torch.cat([
-                proposal_xyz_i - (box_centers - box_half_sizes),
-                (box_centers + box_half_sizes) - proposal_xyz_i,
-            ], dim=1)
-
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)
             gt_boxes.append(gt_boxes_i)
-            gt_box_reg.append(gt_box_reg_i)
 
         gt_labels = torch.stack(gt_labels)
         gt_classes = torch.stack(gt_classes)
         gt_boxes = torch.stack(gt_boxes)
-        gt_box_reg = torch.stack(gt_box_reg)
 
-        return gt_labels, gt_classes, gt_boxes, gt_box_reg
+        return gt_labels, gt_classes, gt_boxes

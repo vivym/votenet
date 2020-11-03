@@ -36,14 +36,14 @@ def convert_scannet():
 
         gt_classes = instance_bboxes[:, 6].astype(np.int64)
         gt_classes[:] = [nyu40id2class[x] for x in gt_classes]
-        instance_bboxes[:, 6] = 0
+        gt_boxes = instance_bboxes[:, :6]
 
         np.savez_compressed(
             f"{new_data_root}{prefix}.npz",
             points=points.astype(np.float32),
             point_votes=point_votes.astype(np.float32),
             point_votes_mask=point_votes_mask.astype(np.bool),
-            gt_boxes=instance_bboxes.astype(np.float32),
+            gt_boxes=gt_boxes.astype(np.float32),
             gt_classes=gt_classes.astype(np.int64),
         )
 

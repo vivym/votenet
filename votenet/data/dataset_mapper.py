@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from votenet.config import configurable
-from votenet.structures import Boxes, Instances
+from votenet.structures import Boxes, BoxMode, Instances
 
 from . import transforms as T
 
@@ -89,12 +89,15 @@ class DatasetMapper:
         Returns:
             dict: a format that builtin models in votenet accept
         """
+        bbox_mode = dataset_dict["bbox_mode"]
         dataset_dict = np.load(dataset_dict["path"])
         points = dataset_dict["points"]
         point_votes = dataset_dict["point_votes"]
         point_votes_mask = dataset_dict["point_votes_mask"]
         gt_boxes = dataset_dict["gt_boxes"]
         gt_classes = dataset_dict["gt_classes"]
+
+        gt_boxes = BoxMode.convert(gt_boxes, bbox_mode, BoxMode.XYZXYZ_ABS)
 
         if self.use_color:
             points = points[:, :6]

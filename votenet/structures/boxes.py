@@ -21,24 +21,14 @@ class BoxMode(IntEnum):
     """
     XYZWDH_ABS = 1
     """
-    (x0, y0, z0, w, d, h) in absolute floating points coordinates.
-    """
-    XYZXYZ_REL = 2
-    """
-    Not yet supported!
-    (x0, y0, z0, x1, y1, z1) in range [0, 1]. They are relative to the size of the image.
-    """
-    XYZWDH_REL = 3
-    """
-    Not yet supported!
-    (x0, y0, z0, w, d, h) in range [0, 1]. They are relative to the size of the image.
+    (xc, yc, zc, w, d, h) in absolute floating points coordinates.
     """
 
     @staticmethod
     def convert(box: _RawBoxType, from_mode: "BoxMode", to_mode: "BoxMode") -> _RawBoxType:
         """
         Args:
-            box: can be a k-tuple, k-list or an Nxk array/tensor, where k = 6
+            box: can be a k-tuple, k-list or an Nxk array/tensor, where k = 6 or 7
             from_mode, to_mode (BoxMode)
 
         Returns:
@@ -51,7 +41,7 @@ class BoxMode(IntEnum):
         is_numpy = isinstance(box, np.ndarray)
         single_box = isinstance(box, (list, tuple))
         if single_box:
-            assert len(box) == 6, (
+            assert len(box) == 6 or len(box) == 7, (
                 "BoxMode.convert takes either a k-tuple/list or an Nxk array/tensor,"
                 " where k == 6"
             )
@@ -63,34 +53,14 @@ class BoxMode(IntEnum):
             else:
                 arr = box.clone()
 
-        assert to_mode.value not in [
-            BoxMode.XYZXYZ_REL,
-            BoxMode.XYZWDH_REL,
-        ] and from_mode.value not in [
-            BoxMode.XYZXYZ_REL,
-            BoxMode.XYZWDH_REL,
-        ], "Relative mode not yet supported!"
-
         if to_mode == BoxMode.XYZXYZ_ABS and from_mode == BoxMode.XYZWDH_ABS:
-            half_width = arr[:, 3] / 2.
-            half_depth = arr[:, 4] / 2.
-            half_height = arr[:, 5] / 2.
-            arr[:, 3] = arr[:, 0] + half_width
-            arr[:, 4] = arr[:, 1] + half_depth
-            arr[:, 5] = arr[:, 2] + half_height
-            arr[:, 0] -= half_width
-            arr[:, 1] -= half_depth
-            arr[:, 2] -= half_height
+            half_sizes = arr[:, 3:6] / 2.
+            arr[:, 3:6] = arr[:, :3] + half_sizes
+            arr[:, :3] -= half_sizes
         elif from_mode == BoxMode.XYZXYZ_ABS and to_mode == BoxMode.XYZWDH_ABS:
-            width = arr[:, 3] - arr[:, 0]
-            depth = arr[:, 4] - arr[:, 1]
-            height = arr[:, 5] - arr[:, 2]
-            arr[:, 0] += width / 2.
-            arr[:, 1] += depth / 2.
-            arr[:, 2] += height / 2.
-            arr[:, 3] = width
-            arr[:, 4] = depth
-            arr[:, 5] = height
+            sizes = arr[:, 3:6] - arr[:, :3]
+            arr[:, :3] += sizes / 2.
+            arr[:, 3:6] = sizes
         else:
             raise NotImplementedError(
                 "Conversion from BoxMode {} to {} is not supported yet".format(
@@ -108,20 +78,22 @@ class BoxMode(IntEnum):
 
 class Boxes:
     """
-    This structure stores a list of boxes as a Nx7 torch.Tensor.
+    This structure stores a list of boxes as a Nx6/7 torch.Tensor.
     It supports some common methods about boxes
     (`volume`, `clip`, `nonempty`, etc),
     and also behaves like a Tensor
     (support indexing, `to(device)`, `.device`, and iteration over all boxes)
 
     Attributes:
-        tensor (torch.Tensor): float matrix of Nx7. Each row is (xc, yc, zc, width, depth, height).
+        tensor (torch.Tensor): float matrix of Nx6/7.
+        Each row is (x0, y0, z0, x1, y1, z1, angle).
     """
 
     def __init__(self, tensor: torch.Tensor):
         """
         Args:
-            tensor (Tensor[float]): a Nx7 matrix.  Each row is (xc, yc, zc, width, depth, height).
+            tensor (Tensor[float]): a Nxk matrix, where k = 6 or 7.
+            Each row is (x0, y0, z0, x1, y1, z1, angle).
         """
         device = tensor.device if isinstance(tensor, torch.Tensor) else torch.device("cpu")
         tensor = torch.as_tensor(tensor, dtype=torch.float32, device=device)
@@ -129,7 +101,7 @@ class Boxes:
             # Use reshape, so we don't end up creating a new tensor that does not depend on
             # the inputs (and consequently confuses jit)
             tensor = tensor.reshape((0, 7)).to(dtype=torch.float32, device=device)
-        assert tensor.dim() == 2 and tensor.size(-1) == 7, tensor.size()
+        assert tensor.dim() == 2 and (tensor.size(-1) == 7 or tensor.size(-1) == 6), tensor.size()
 
         self.tensor = tensor
 
@@ -231,6 +203,7 @@ class Boxes:
         Returns:
             a binary vector, indicating whether each box is inside the reference box.
         """
+        # TODO: support angle
         width, depth, height = box_size
         inds_inside = (
             (self.tensor[..., 0] >= -boundary_threshold)
@@ -247,7 +220,7 @@ class Boxes:
         Returns:
             The box centers in a Nx3 array of (x, y, z).
         """
-        return (self.tensor[:, :3] + self.tensor[:, 3:]) / 2
+        return (self.tensor[:, :3] + self.tensor[:, 3:6]) / 2
 
     def scale(self, scale_x: float, scale_y: float, scale_z: float) -> None:
         """
