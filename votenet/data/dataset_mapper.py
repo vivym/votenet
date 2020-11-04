@@ -97,7 +97,7 @@ class DatasetMapper:
         gt_boxes = dataset_dict["gt_boxes"]
         gt_classes = dataset_dict["gt_classes"]
 
-        gt_boxes = BoxMode.convert(gt_boxes, bbox_mode, BoxMode.XYZXYZ_ABS)
+        gt_boxes = BoxMode.convert(gt_boxes, from_mode=bbox_mode, to_mode=BoxMode.XYZWDH_ABS)
 
         if self.use_color:
             points = points[:, :6]
@@ -123,7 +123,7 @@ class DatasetMapper:
             point_votes = np.tile(point_votes, (1, 3))
 
         instances = Instances()
-        instances.gt_boxes = Boxes(torch.as_tensor(gt_boxes))
+        instances.gt_boxes = Boxes.from_tensor(torch.as_tensor(gt_boxes), mode=BoxMode.XYZWDH_ABS)
         instances.gt_classes = torch.as_tensor(gt_classes)
 
         if self.use_height:

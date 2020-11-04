@@ -22,7 +22,6 @@ class XFlipTransform(Transform):
         assert box.shape[1] == 6 or box.shape[1] == 7
 
         box[:, 0] *= -1
-        box[:, 3] *= -1
 
         if box.shape[1] == 7:
             box[:, 6] = np.pi - box[:, 6]
@@ -39,7 +38,6 @@ class YFlipTransform(Transform):
         assert box.shape[1] == 6 or box.shape[1] == 7
 
         box[:, 1] *= -1
-        box[:, 4] *= -1
 
         if box.shape[1] == 7:
             box[:, 6] *= -1
@@ -69,8 +67,6 @@ class ZRotationTransform(Transform):
         assert box.shape[1] == 6 or box.shape[1] == 7
         batch_size = box.shape[0]
 
-        box = BoxMode.convert(box, BoxMode.XYZXYZ_ABS, BoxMode.XYZWDH_ABS)
-
         box[:, :3] = np.dot(box[:, :3], np.transpose(self.rot_mat))
 
         if box.shape[1] == 6:  # axis aligned box
@@ -92,8 +88,6 @@ class ZRotationTransform(Transform):
             box[:, 4] = new_y
         else:
             box[:, 6] -= self.angle
-
-        box = BoxMode.convert(box, BoxMode.XYZWDH_ABS, BoxMode.XYZXYZ_ABS)
 
         return box
 
