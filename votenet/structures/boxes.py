@@ -1,6 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from enum import IntEnum, unique
-from typing import List, Any, Tuple, Union, Optional
+from typing import List, Any, Dict, Tuple, Union, Optional
 
 import numpy as np
 import torch
@@ -28,7 +28,7 @@ class BoxMode(IntEnum):
     """
 
     @staticmethod
-    def convert(box: _RawBoxType, from_mode: "BoxMode", to_mode: "BoxMode") -> _RawBoxType:
+    def convert(box: _RawBoxType, from_mode: "BoxMode", to_mode: "BoxMode", **kwargs: Dict[str, Any]) -> _RawBoxType:
         """
         Args:
             box: can be a k-tuple, k-list or an Nxk array/tensor, where k = 6 or 7 or 9
@@ -72,12 +72,30 @@ class BoxMode(IntEnum):
             sizes = arr[:, 3:6] - arr[:, 0:3]
             arr[:, 0:3] += sizes / 2.
             arr[:, 3:6] = sizes
+        elif from_mode == BoxMode.XYZWDH_ABS and to_mode == BoxMode.XYZLBDRFU_ABS:
+            assert "origins" in kwargs
+            origins = kwargs["origins"]
+            has_angles = arr.size(0) == 7
+            half_sizes = arr[:, 3:6] / 2.
+            p1 = arr[:, 0:3] - half_sizes
+            p2 = arr[:, 0:3] + half_sizes
+            angles = arr[:, 6] if has_angles else None
+            arr = torch.zeros(arr.size(0), 10 if has_angles else 9, dtype=arr.dtype, device=arr.device)
+            if has_angles:
+                arr[:, 9] = angles
+            arr[:, 0:3] = origins
+            arr[:, 3:6] = origins - p1
+            arr[:, 6:9] = p2 - origins
         elif from_mode == BoxMode.XYZLBDRFU_ABS and \
                 (to_mode == BoxMode.XYZXYZ_ABS or to_mode == BoxMode.XYZWDH_ABS):
+            has_angles = arr.size(0) == 10
             xyz = arr[:, 0:3]
             lbd = arr[:, 3:6]
             rfu = arr[:, 6:9]
-            arr = torch.zeros(arr.size(0), 6, dtype=arr.dtype, device=arr.device)
+            angles = arr[:, 9] if has_angles else None
+            arr = torch.zeros(arr.size(0), 7 if has_angles else 6, dtype=arr.dtype, device=arr.device)
+            if has_angles:
+                arr[:, 6] = angles
             p1 = xyz - lbd
             p2 = xyz + rfu
 
@@ -104,6 +122,9 @@ class BoxMode(IntEnum):
 
 
 class Boxes(object, metaclass=ABCMeta):
+    def __init__(self, tensor: torch.Tensor):
+        self.tensor = tensor
+
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor, mode: "BoxMode") -> "Boxes":
         if mode == BoxMode.XYZWDH_ABS:
@@ -117,7 +138,6 @@ class Boxes(object, metaclass=ABCMeta):
     def convert(self, to_mode: "BoxMode"):
         pass
 
-    @abstractmethod
     def clone(self) -> "Boxes":
         """
         Clone the Boxes.
@@ -125,10 +145,14 @@ class Boxes(object, metaclass=ABCMeta):
         Returns:
             Boxes
         """
-        pass
+        return type(self)(self.tensor.clone())
 
-    @abstractmethod
     def to(self, *args: Any, **kwargs: Any):
+        return type(self)(self.tensor.to(*args, **kwargs))
+
+    @property
+    @abstractmethod
+    def with_angle(self) -> bool:
         pass
 
     @abstractmethod
@@ -138,6 +162,70 @@ class Boxes(object, metaclass=ABCMeta):
     @abstractmethod
     def get_sizes(self) -> torch.Tensor:
         pass
+
+    def __getitem__(self, item):
+        """
+        Args:
+            item: int, slice, or a BoolTensor
+
+        Returns:
+            Boxes: Create a new :class:`Boxes` by indexing.
+
+        The following usage are allowed:
+
+        1. `new_boxes = boxes[3]`: return a `Boxes` which contains only one box.
+        2. `new_boxes = boxes[2:10]`: return a slice of boxes.
+        3. `new_boxes = boxes[vector]`, where vector is a torch.BoolTensor
+           with `length = len(boxes)`. Nonzero elements in the vector will be selected.
+
+        Note that the returned Boxes might share storage with this Boxes,
+        subject to Pytorch's indexing semantics.
+        """
+        cls = type(self)
+        if isinstance(item, int):
+            return cls(self.tensor[item].view(1, -1))
+        b = self.tensor[item]
+        assert b.dim() == 2, "Indexing on Boxes with {} failed to return a matrix!".format(item)
+        return cls(b)
+
+    def __len__(self) -> int:
+        return self.tensor.shape[0]
+
+    @abstractmethod
+    def __repr__(self) -> str:
+        pass
+
+    @classmethod
+    @torch.jit.unused
+    def cat(cls, boxes_list: List["Boxes"]) -> "Boxes":
+        """
+        Concatenates a list of Boxes into a single Boxes
+
+        Arguments:
+            boxes_list (list[Boxes])
+
+        Returns:
+            Boxes: the concatenated Boxes
+        """
+        assert isinstance(boxes_list, (list, tuple))
+        assert len(boxes_list) > 0
+        assert all([isinstance(box, Boxes) for box in boxes_list])
+        assert all([type(box) == type(boxes_list[0]) for box in boxes_list])
+        type_cls = type(boxes_list[0])
+
+        # use torch.cat (v.s. layers.cat) so the returned boxes never share storage with input
+        cat_boxes = type_cls(torch.cat([b.tensor for b in boxes_list], dim=0))
+        return cat_boxes
+
+    @property
+    def device(self) -> torch.device:
+        return self.tensor.device
+
+    def __iter__(self):
+        """
+        Yield a box as a Tensor of shape (6/7,) at a time.
+        """
+        yield from self.tensor
 
 
 class XYZWDHBoxes(Boxes):
@@ -153,46 +241,33 @@ class XYZWDHBoxes(Boxes):
         if tensor.numel() == 0:
             # Use reshape, so we don't end up creating a new tensor that does not depend on
             # the inputs (and consequently confuses jit)
-            tensor = tensor.reshape((0, 6)).to(dtype=torch.float32, device=device)
+            tensor = tensor.reshape((0, 7)).to(dtype=torch.float32, device=device)
         assert tensor.dim() == 2 and (tensor.size(-1) == 7 or tensor.size(-1) == 6), tensor.size()
 
-        self.boxes = tensor[:, :6]
-        if angles is not None:
-            assert self.boxes.size(0) == self.angles.size(0)
-            self.angles = angles
-        else:
-            self.angles = tensor[:, 6] if tensor.size(-1) == 7 else None
+        super().__init__(tensor)
 
-    def convert(self, to_mode: "BoxMode"):
+    def convert(self, to_mode: "BoxMode", **kwargs: Dict[str, Any]):
         if to_mode == BoxMode.XYZLBDRFU_ABS:
+            assert "origins" in kwargs
             boxes = BoxMode.convert(
-                self.boxes, from_mode=BoxMode.XYZWDH_ABS, to_mode=BoxMode.XYZLBDRFU_ABS
+                self.tensor, from_mode=BoxMode.XYZWDH_ABS, to_mode=BoxMode.XYZLBDRFU_ABS, **kwargs
             )
-            return XYZLBDRFUBoxes(boxes, self.angles)
+            return XYZLBDRFUBoxes(boxes)
         else:
             raise NotImplementedError
 
-    def clone(self) -> "Boxes":
-        """
-        Clone the Boxes.
-
-        Returns:
-            Boxes
-        """
-        return XYZWDHBoxes(self.boxes.clone(), None if self.angles is None else self.angles.clone())
-
-    @torch.jit.unused
-    def to(self, *args: Any, **kwargs: Any):
-        return XYZWDHBoxes(
-            self.boxes.to(*args, **kwargs),
-            None if self.angles is None else self.angles.to(*args, **kwargs),
-        )
+    @property
+    def with_angle(self) -> bool:
+        return self.tensor.size(-1) == 7
 
     def get_centers(self) -> torch.Tensor:
-        return self.boxes[: 0:3]
+        return self.tensor[:, 0:3]
 
     def get_sizes(self) -> torch.Tensor:
-        return self.boxes[:, 3:6]
+        return self.tensor[:, 3:6]
+
+    def __repr__(self) -> str:
+        return f"XYZWDHBoxes({str(self.tensor)})"
 
 
 class XYZLBDRFUBoxes(Boxes):
@@ -211,40 +286,26 @@ class XYZLBDRFUBoxes(Boxes):
             tensor = tensor.reshape((0, 9)).to(dtype=torch.float32, device=device)
         assert tensor.dim() == 2 and (tensor.size(-1) == 10 or tensor.size(-1) == 9), tensor.size()
 
-        self.boxes = tensor[:, :9]
-        if angles is not None:
-            assert self.boxes.size(0) == self.angles.size(0)
-            self.angles = angles
-        else:
-            self.angles = tensor[:, 9] if tensor.size(-1) == 10 else None
+        super().__init__(tensor)
 
     def convert(self, to_mode: "BoxMode"):
         if to_mode == BoxMode.XYZWDH_ABS:
             boxes = BoxMode.convert(
-                self.boxes, from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZWDH_ABS
+                self.tensor, from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZWDH_ABS
             )
-            return XYZWDHBoxes(boxes, self.angles)
+            return XYZWDHBoxes(boxes)
         else:
             raise NotImplementedError
 
-    def clone(self) -> "Boxes":
-        """
-        Clone the Boxes.
-
-        Returns:
-            Boxes
-        """
-        return XYZLBDRFUBoxes(self.boxes.clone(), None if self.angles is None else self.angles.clone())
-
-    @torch.jit.unused
-    def to(self, *args: Any, **kwargs: Any):
-        return XYZLBDRFUBoxes(
-            self.boxes.to(*args, **kwargs),
-            None if self.angles is None else self.angles.to(*args, **kwargs),
-        )
+    @property
+    def with_angle(self) -> bool:
+        return self.tensor.size(-1) == 10
 
     def get_centers(self) -> torch.Tensor:
         return self.convert(BoxMode.XYZWDH_ABS).get_centers()
 
     def get_sizes(self) -> torch.Tensor:
         return self.convert(BoxMode.XYZWDH_ABS).get_sizes()
+
+    def __repr__(self) -> str:
+        return f"XYZLBDRFUBoxes({str(self.tensor)})"

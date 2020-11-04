@@ -44,7 +44,7 @@ class VotingModule(nn.Module):
 
         net = net.transpose(2, 1).view(batch_size, num_seed, self.vote_factor, 3 + self.out_dim)
         offset = net[:, :, :, 0:3]
-        vote_xyz = seed_xyz.unsqueeze(2) + offset
+        vote_xyz = seed_xyz.unsqueeze(2) + offset.contiguous()
         vote_xyz = vote_xyz.contiguous().view(batch_size, num_vote, 3)
 
         residual_features = net[:, :, :, 3:]  # (batch_size, num_seed, vote_factor, out_dim)

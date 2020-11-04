@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from votenet.config import configurable
 
@@ -60,8 +61,8 @@ class StandardRPNHead(nn.Module):
         x = self.convs(x)
         x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
-        pred_objectness_logits = x[:, :, 0] # (bs, num_proposals)
-        pred_box_reg = x[:, :, 1:7]
+        pred_objectness_logits = x[:, :, 0]  # (bs, num_proposals)
+        pred_box_reg = F.relu(x[:, :, 1:7])
         idx = 7
 
         pred_heading_cls_logits, pred_heading_deltas = None, None

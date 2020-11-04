@@ -32,11 +32,16 @@ class ROIGridPooler(nn.Module):
 
     def forward(self, seed_xyz: torch.Tensor, seed_features: torch.Tensor, proposals: List[Instances]):
         batch_size = len(proposals)
-        num_proposals = proposals[0].pred_origins.size(0)
+        num_proposals = len(proposals[0].pred_boxes)
+        dtype = proposals[0].pred_boxes.tensor.dtype
+        device = proposals[0].pred_boxes.tensor.device
 
-        pred_origins = torch.stack([x.pred_origins for x in proposals])
-        pred_box_reg = torch.stack([x.pred_box_reg for x in proposals])
-        pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
+        pred_origins = torch.stack([x.pred_boxes.tensor[:, 0:3] for x in proposals])
+        pred_box_reg = torch.stack([x.pred_boxes.tensor[:, 3:9] for x in proposals])
+        if proposals[0].pred_boxes.with_angle:
+            pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
+        else:
+            pred_heading_angles = torch.zeros(batch_size, num_proposals, dtype=dtype, device=device)
 
         # (bs, num_proposal, num_key_points, 3)
         key_points = get_global_grid_points_of_rois(

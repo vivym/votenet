@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 from torch import nn
@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from votenet.config import configurable
 from votenet.layers import huber_loss
 from votenet.utils.registry import Registry
-from votenet.structures import Instances
+from votenet.structures import Instances, Boxes, BoxMode
 
 from .box_head import build_box_head
 from ..pooler import ROIGridPooler
@@ -91,46 +91,50 @@ class StandardROIHeads(nn.Module):
             )
             return None, losses
         else:
+            losses = {}
+
+        # TODO: yield proposals when training
+        if not self.training or False:
             pred_instances = self.predict_instances(
                 pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
             )
-            return pred_instances, {}
+        else:
+            pred_instances = None
+        return pred_instances, losses
 
     @torch.no_grad()
     def predict_instances(
             self,
             pred_cls_logits: torch.Tensor,
             pred_box_deltas: torch.Tensor,
-            pred_heading_deltas: torch.Tensor,
+            pred_heading_deltas: Optional[torch.Tensor],
             proposals: List[Instances],
     ):
         device = pred_cls_logits.device
         batch_size = pred_cls_logits.size(0)
 
-        # TODO: gather
         pred_scores, pred_classes = pred_cls_logits.sigmoid().max(dim=2)
 
         batch_inds = torch.arange(0, batch_size, dtype=torch.int64, device=device)
 
-        pred_box_reg = torch.stack([x.pred_box_reg for x in proposals])
-        pred_box_reg += pred_box_deltas[batch_inds, pred_classes]
-        pred_origins = torch.stack([x.pred_origins for x in proposals])
-        p1 = pred_origins - pred_box_reg[:, :, :3]
-        p2 = pred_origins + pred_box_reg[:, :, 3:]
+        pred_boxes = torch.stack([x.pred_boxes.tensor for x in proposals])
+        pred_boxes[..., 3:9] += pred_box_deltas[batch_inds, pred_classes]
 
-        pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
-        pred_heading_angles += pred_heading_deltas[batch_inds, pred_classes]
-
-        pred_boxes = torch.cat([(p1 + p2) / 2., (p2 - p1), pred_heading_angles], dim=2)
+        if pred_heading_deltas is not None:
+            pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
+            pred_heading_angles += pred_heading_deltas[batch_inds, pred_classes]
+            pred_boxes = torch.cat([pred_boxes, pred_heading_angles], dim=-1)
 
         instances = []
         for pred_scores_i, pred_classes_i, pred_boxes_i in zip(
                 pred_scores, pred_classes, pred_boxes
         ):
+            pred_boxes_i = Boxes.from_tensor(pred_boxes_i, mode=BoxMode.XYZLBDRFU_ABS)
+
             instances_i = Instances()
             instances_i.pred_classes = pred_classes_i
             instances_i.pred_scores = pred_scores_i
-            instances_i.pred_boxes = pred_boxes_i
+            instances_i.pred_boxes = pred_boxes_i.convert(BoxMode.XYZWDH_ABS)
 
             instances.append(instances_i)
 
@@ -140,7 +144,7 @@ class StandardROIHeads(nn.Module):
             self,
             pred_cls_logits: torch.Tensor,
             pred_box_deltas: torch.Tensor,
-            pred_heading_deltas: torch.Tensor,
+            pred_heading_deltas: Optional[torch.Tensor],
             proposals: List[Instances],
     ):
         batch_size = pred_cls_logits.size(0)
@@ -148,8 +152,9 @@ class StandardROIHeads(nn.Module):
         normalizer = batch_size * num_proposals
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
-        gt_box_reg = torch.stack([x.gt_box_reg for x in proposals])
-        gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])
+        gt_boxes = torch.stack([x.gt_boxes.tensor[:, 3:9] for x in proposals])
+        pred_boxes = torch.stack([x.pred_boxes.tensor[:, 3:9] for x in proposals])
+        gt_box_deltas = gt_boxes - pred_boxes
 
         losses = {}
         losses["loss_cls"] = F.cross_entropy(
@@ -165,19 +170,22 @@ class StandardROIHeads(nn.Module):
         # TODO: configurable
         losses["loss_box_reg"] = huber_loss(
             pred_box_deltas[fg_mask, :],
-            gt_box_reg[fg_mask, :],
+            gt_box_deltas[fg_mask, :],
             beta=0.15,
             reduction="sum",
         ) / normalizer
 
-        pred_heading_deltas = torch.gather(
-            pred_heading_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1)
-        ).view(batch_size, num_proposals)
-        losses["loss_angle_reg"] = huber_loss(
-            pred_heading_deltas[fg_mask],
-            gt_heading_deltas[fg_mask],
-            beta=1.0,
-            reduction="sum",
-        ) / normalizer
+        if pred_heading_deltas is not  None:
+            gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])
+
+            pred_heading_deltas = torch.gather(
+                pred_heading_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1)
+            ).view(batch_size, num_proposals)
+            losses["loss_angle_reg"] = huber_loss(
+                pred_heading_deltas[fg_mask],
+                gt_heading_deltas[fg_mask],
+                beta=1.0,
+                reduction="sum",
+            ) / normalizer
 
         return losses

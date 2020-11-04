@@ -12,16 +12,24 @@ def convert_scannet():
     data_root = "./datasets/scannet/scannet_train_detection_data/"
     new_data_root = "./datasets/scannet/data/"
 
-    scans = set([
+    try:
+        os.makedirs(new_data_root)
+    except:
+        pass
+
+    scans = sorted(set([
         os.path.basename(file_name)[:12]
         for file_name in os.listdir(data_root)
-    ])
+    ]))
 
     for prefix in tqdm(scans):
         points = np.load(f"{data_root}{prefix}_vert.npy")
         instance_bboxes = np.load(f"{data_root}{prefix}_bbox.npy")
         instance_labels = np.load(f"{data_root}{prefix}_ins_label.npy")
         semantic_labels = np.load(f"{data_root}{prefix}_sem_label.npy")
+
+        if instance_bboxes.shape[0] == 0:
+            continue
 
         point_votes = np.zeros([points.shape[0], 3])
         point_votes_mask = np.zeros(points.shape[0])

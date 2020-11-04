@@ -1,7 +1,7 @@
 INPUT:
   AXIS_ALIGNED_BOX: True
 SOLVER:
-  IMS_PER_BATCH: 1
+  IMS_PER_BATCH: 8
 DATASETS:
   TRAIN: ("scannet_v2/train",)
   TEST: ("scannet_v2/val",)

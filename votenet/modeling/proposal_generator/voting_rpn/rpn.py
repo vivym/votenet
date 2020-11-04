@@ -7,7 +7,7 @@ from torch.nn import functional as F
 
 from votenet.config import configurable
 from votenet.layers import nn_distance, huber_loss
-from votenet.structures import Instances
+from votenet.structures import Instances, Boxes, BoxMode
 from votenet.utils.events import get_event_storage
 
 from ..build import PROPOSAL_GENERATOR_REGISTRY
@@ -69,12 +69,13 @@ class VotingRPN(nn.Module):
         else:
             gt_classes = None
             gt_boxes = None
+            gt_heading_classes = None
             gt_heading_deltas = None
             losses = {}
 
         proposals = self.predict_proposals(
             voted_xyz, pred_objectness_logits, pred_box_reg, pred_heading_cls_logits, pred_heading_deltas,
-            gt_classes, gt_boxes, gt_box_reg, gt_heading_deltas
+            gt_classes, gt_boxes, gt_heading_classes, gt_heading_deltas
         )
         return proposals, losses
 
@@ -84,44 +85,51 @@ class VotingRPN(nn.Module):
             proposal_xyz: torch.Tensor,
             pred_objectness_logits: torch.Tensor,
             pred_box_reg: torch.Tensor,
-            pred_heading_cls_logits: torch.Tensor,
-            pred_heading_deltas: torch.Tensor,
+            pred_heading_cls_logits: Optional[torch.Tensor] = None,
+            pred_heading_deltas: Optional[torch.Tensor] = None,
             gt_classes: Optional[torch.Tensor] = None,
             gt_boxes: Optional[torch.Tensor] = None,
-            gt_box_reg: Optional[torch.Tensor] = None,
+            gt_heading_classes: Optional[torch.Tensor] = None,
             gt_heading_deltas: Optional[torch.Tensor] = None,
     ):
-        pred_objectness = pred_objectness_logits.sigmoid()
+        pred_objectness = pred_objectness_logits.detach().sigmoid()
 
-        pred_heading_class = torch.argmax(pred_heading_cls_logits, dim=2)  # (bs, num_proposals)
-        pred_heading_deltas = torch.gather(
-            pred_heading_deltas, dim=2, index=pred_heading_class.unsqueeze(-1)
-        ).squeeze(-1)  # (bs, num_proposals)
+        if pred_heading_cls_logits is not None:
+            if gt_heading_classes is None:
+                # TODO: not pick the one, pick by score
+                heading_classes = torch.argmax(pred_heading_cls_logits.detach(), dim=2)  # (bs, num_proposals)
+            else:
+                heading_classes = gt_heading_classes
+            pred_heading_deltas = torch.gather(
+                pred_heading_deltas.detach(), dim=2, index=heading_classes.unsqueeze(-1)
+            ).squeeze(-1)  # (bs, num_proposals)
 
-        pred_heading_angles = pred_heading_class.float() * (2 * np.pi / 12) + pred_heading_deltas
-        pred_heading_angles = pred_heading_angles % (2 * np.pi)
+            pred_heading_angles = heading_classes.float() * (2 * np.pi / 12) + pred_heading_deltas
+            pred_heading_angles = pred_heading_angles % (2 * np.pi)
+        else:
+            pred_heading_angles = None
 
         proposals = []
-        for i, (pred_objectness_i, pred_origins_i, pred_box_reg_i, pred_heading_angles_i) in enumerate(zip(
-                pred_objectness, proposal_xyz, pred_box_reg, pred_heading_angles
+        for i, (pred_objectness_i, pred_origins_i, pred_box_reg_i) in enumerate(zip(
+                pred_objectness, proposal_xyz, pred_box_reg
         )):
-            # TODO: detach or not
             instances = Instances()
-            instances.pred_objectness = pred_objectness_i.detach()
-            instances.pred_origins = pred_origins_i.detach()
-            instances.pred_box_reg = pred_box_reg_i.detach()
-            instances.pred_heading_angles = pred_heading_angles_i.detach()
+            instances.pred_objectness = pred_objectness_i
+            instances.pred_boxes = Boxes.from_tensor(
+                torch.cat([pred_origins_i.detach(), pred_box_reg_i.detach()], dim=-1),
+                mode=BoxMode.XYZLBDRFU_ABS,
+            )
+            if pred_heading_angles is not None:
+                instances.pred_heading_angles = pred_heading_angles[i]
 
             if gt_classes is not None:
                 instances.gt_classes = gt_classes[i]
 
             if gt_boxes is not None:
-                assert gt_box_reg is not None
-                instances.gt_boxes = gt_boxes[i]
-                instances.gt_box_reg = gt_box_reg[i] - pred_box_reg_i
+                instances.gt_boxes = Boxes.from_tensor(gt_boxes[i], mode=BoxMode.XYZLBDRFU_ABS)
 
             if gt_heading_deltas is not None:
-                instances.gt_heading_deltas = gt_heading_deltas[i] - pred_heading_angles_i
+                instances.gt_heading_deltas = gt_heading_deltas[i]
 
             proposals.append(instances)
 
@@ -129,7 +137,7 @@ class VotingRPN(nn.Module):
 
     @torch.no_grad()
     def compute_gt_angles(self, gt_boxes: torch.Tensor):
-        gt_angles = gt_boxes[..., 6] % (2 * np.pi)
+        gt_angles = gt_boxes[..., -1] % (2 * np.pi)
         angle_per_bin = 2 * np.pi / 12
         shifted_angles = (gt_angles + angle_per_bin / 2) % (2 * np.pi)
         gt_heading_classes = shifted_angles / angle_per_bin
@@ -167,7 +175,8 @@ class VotingRPN(nn.Module):
             reduction="sum",
         ) / normalizer
 
-        losses["loss_rpn_box_reg"] = huber_loss(
+        gt_box_reg = gt_boxes[..., 3:9]
+        losses["loss_rpn_loc"] = huber_loss(
             pred_box_reg[pos_mask],
             gt_box_reg[pos_mask],
             beta=1.0,
@@ -183,9 +192,8 @@ class VotingRPN(nn.Module):
                 reduction="sum",
             ) / normalizer
 
-            # TODO: optimize this
             batch_inds, proposal_inds = torch.nonzero(pos_mask, as_tuple=True)
-            losses["loss_rpn_angle_reg"] = huber_loss(
+            losses["loss_rpn_angle_delta"] = huber_loss(
                 pred_heading_deltas[batch_inds, proposal_inds, gt_heading_classes],
                 gt_heading_deltas[pos_mask],
                 beta=1.0,
@@ -209,7 +217,7 @@ class VotingRPN(nn.Module):
         for (proposal_xyz_i, gt_instances_i) in zip(proposal_xyz, gt_instances):
             gt_classes_i = gt_instances_i.gt_classes
             gt_centers_i = gt_instances_i.gt_boxes.get_centers()
-            gt_sizes_i = gt_instances_i.gt_boxes.tensor[:, 3:6]
+            gt_sizes_i = gt_instances_i.gt_boxes.get_sizes()
 
             dists, inds, _, _ = nn_distance(proposal_xyz_i, gt_centers_i, dist="euclidean")
 
@@ -220,7 +228,8 @@ class VotingRPN(nn.Module):
             gt_labels_i[dists < threshold] = 1
             gt_classes_i[dists >= threshold] = self.num_classes  # background
 
-            gt_boxes_i = gt_instances_i.gt_boxes.tensor[inds, :]
+            gt_boxes_i = gt_instances_i.gt_boxes[inds, :]
+            gt_boxes_i = gt_boxes_i.convert(BoxMode.XYZLBDRFU_ABS, origins=proposal_xyz_i).tensor
 
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)
