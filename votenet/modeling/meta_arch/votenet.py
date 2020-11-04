@@ -1,7 +1,10 @@
+from typing import List
+
 import torch
 from torch import nn
 
 from votenet.config import configurable
+from votenet.structures import Instances
 
 from ..backbone import Backbone, build_backbone
 from ..vote_generator import build_vote_generator
@@ -105,7 +108,7 @@ class GeneralizedVoteNet(nn.Module):
             assert "proposals" in batched_inputs[0]
             proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
-        results, _ = self.roi_heads(seed_xyz, seed_features, voted_xyz, voted_features, proposals)
+        results, _ = self.roi_heads(seed_xyz, seed_features, voted_features, proposals)
 
         return results
 

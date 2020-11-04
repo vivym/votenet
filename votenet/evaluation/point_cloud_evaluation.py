@@ -66,11 +66,10 @@ class PointCloudEvaluation(DatasetEvaluator):
                 "instances" that contains :class:`Instances`.
         """
         for input, output in zip(inputs, outputs):
-            prediction = {"image_id": input["image_id"]}
+            prediction = {"path": input["path"]}
 
             if "instances" in output:
-                instances = output["instances"].to(self._cpu_device)
-                prediction["instances"] = instances_to_coco_json(instances, input["image_id"])
+                prediction["instances"] = output["instances"].to(self._cpu_device)
             if "proposals" in output:
                 prediction["proposals"] = output["proposals"].to(self._cpu_device)
             self._predictions.append(prediction)
@@ -87,7 +86,7 @@ class PointCloudEvaluation(DatasetEvaluator):
             predictions = self._predictions
 
         if len(predictions) == 0:
-            self._logger.warning("[COCOEvaluator] Did not receive valid predictions.")
+            self._logger.warning("[PointCloudEvaluation] Did not receive valid predictions.")
             return {}
 
         if self._output_dir:

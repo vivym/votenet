@@ -105,36 +105,45 @@ class StandardROIHeads(nn.Module):
     @torch.no_grad()
     def predict_instances(
             self,
-            pred_cls_logits: torch.Tensor,
+            pred_cls_logits: torch.Tensor,  # (bs, c, num_proposals)
             pred_box_deltas: torch.Tensor,
             pred_heading_deltas: Optional[torch.Tensor],
             proposals: List[Instances],
     ):
-        device = pred_cls_logits.device
         batch_size = pred_cls_logits.size(0)
+        num_proposals = pred_cls_logits.size(-1)
 
-        pred_scores, pred_classes = pred_cls_logits.sigmoid().max(dim=2)
-
-        batch_inds = torch.arange(0, batch_size, dtype=torch.int64, device=device)
+        pred_scores, pred_classes = pred_cls_logits.detach().sigmoid().max(dim=1)
 
         pred_boxes = torch.stack([x.pred_boxes.tensor for x in proposals])
-        pred_boxes[..., 3:9] += pred_box_deltas[batch_inds, pred_classes]
+        pred_box_deltas = torch.gather(
+            pred_box_deltas.detach(), dim=2, index=pred_classes.view(batch_size, num_proposals, 1, 1).repeat(1, 1, 1, 6)
+        ).view(batch_size, num_proposals, 6)
+        pred_boxes[..., 3:9] += pred_box_deltas
 
         if pred_heading_deltas is not None:
             pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
-            pred_heading_angles += pred_heading_deltas[batch_inds, pred_classes]
+            pred_heading_deltas = torch.gather(
+                pred_heading_deltas.detach(), dim=2, index=pred_classes.view(batch_size, num_proposals, 1)
+            ).view(batch_size, num_proposals)
+            pred_heading_angles += pred_heading_deltas
             pred_boxes = torch.cat([pred_boxes, pred_heading_angles], dim=-1)
 
         instances = []
         for pred_scores_i, pred_classes_i, pred_boxes_i in zip(
                 pred_scores, pred_classes, pred_boxes
         ):
-            pred_boxes_i = Boxes.from_tensor(pred_boxes_i, mode=BoxMode.XYZLBDRFU_ABS)
+            pred_boxes_i = Boxes.from_tensor(
+                pred_boxes_i, mode=BoxMode.XYZLBDRFU_ABS
+            ).convert(BoxMode.XYZWDH_ABS)
+
+            # TODO:
+            keep = batch_nms_3d(pred_boxes_i, pred_scores_i)
 
             instances_i = Instances()
             instances_i.pred_classes = pred_classes_i
             instances_i.pred_scores = pred_scores_i
-            instances_i.pred_boxes = pred_boxes_i.convert(BoxMode.XYZWDH_ABS)
+            instances_i.pred_boxes = pred_boxes_i
 
             instances.append(instances_i)
 
@@ -142,8 +151,8 @@ class StandardROIHeads(nn.Module):
 
     def losses(
             self,
-            pred_cls_logits: torch.Tensor,
-            pred_box_deltas: torch.Tensor,
+            pred_cls_logits: torch.Tensor,  # (bs, c, num_proposals)
+            pred_box_deltas: torch.Tensor,  # (bs, num_proposals, 6)
             pred_heading_deltas: Optional[torch.Tensor],
             proposals: List[Instances],
     ):

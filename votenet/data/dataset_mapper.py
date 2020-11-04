@@ -89,8 +89,9 @@ class DatasetMapper:
         Returns:
             dict: a format that builtin models in votenet accept
         """
+        path = dataset_dict["path"]
         bbox_mode = dataset_dict["bbox_mode"]
-        dataset_dict = np.load(dataset_dict["path"])
+        dataset_dict = np.load(path)
         points = dataset_dict["points"]
         point_votes = dataset_dict["point_votes"]
         point_votes_mask = dataset_dict["point_votes_mask"]
@@ -132,6 +133,7 @@ class DatasetMapper:
             points = np.concatenate([points, np.expand_dims(height, 1)], 1)
 
         return {
+            "path": path,
             "points": torch.as_tensor(points),
             "point_votes": torch.as_tensor(point_votes),
             "point_votes_mask": torch.as_tensor(point_votes_mask),
