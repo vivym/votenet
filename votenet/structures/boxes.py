@@ -1,6 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from enum import IntEnum, unique
-from typing import List, Any, Dict, Tuple, Union, Optional
+from typing import List, Any, Tuple, Union, Optional
 
 import numpy as np
 import torch
@@ -28,7 +28,7 @@ class BoxMode(IntEnum):
     """
 
     @staticmethod
-    def convert(box: _RawBoxType, from_mode: "BoxMode", to_mode: "BoxMode", **kwargs: Dict[str, Any]) -> _RawBoxType:
+    def convert(box: _RawBoxType, from_mode: "BoxMode", to_mode: "BoxMode", **kwargs: Any) -> _RawBoxType:
         """
         Args:
             box: can be a k-tuple, k-list or an Nxk array/tensor, where k = 6 or 7 or 9
@@ -64,30 +64,47 @@ class BoxMode(IntEnum):
                 " where k == 9 or 10"
             )
 
-        if from_mode == BoxMode.XYZWDH_ABS and to_mode == BoxMode.XYZXYZ_ABS:
-            half_sizes = arr[:, 3:6] / 2.
-            arr[:, 3:6] = arr[:, 0:3] + half_sizes
-            arr[:, 0:3] -= half_sizes
-        elif from_mode == BoxMode.XYZXYZ_ABS and to_mode == BoxMode.XYZWDH_ABS:
-            sizes = arr[:, 3:6] - arr[:, 0:3]
-            arr[:, 0:3] += sizes / 2.
-            arr[:, 3:6] = sizes
-        elif from_mode == BoxMode.XYZWDH_ABS and to_mode == BoxMode.XYZLBDRFU_ABS:
-            assert "origins" in kwargs
-            origins = kwargs["origins"]
-            has_angles = arr.size(0) == 7
-            half_sizes = arr[:, 3:6] / 2.
-            p1 = arr[:, 0:3] - half_sizes
-            p2 = arr[:, 0:3] + half_sizes
-            angles = arr[:, 6] if has_angles else None
-            arr = torch.zeros(arr.size(0), 10 if has_angles else 9, dtype=arr.dtype, device=arr.device)
-            if has_angles:
-                arr[:, 9] = angles
-            arr[:, 0:3] = origins
-            arr[:, 3:6] = origins - p1
-            arr[:, 6:9] = p2 - origins
-        elif from_mode == BoxMode.XYZLBDRFU_ABS and \
-                (to_mode == BoxMode.XYZXYZ_ABS or to_mode == BoxMode.XYZWDH_ABS):
+        if from_mode == BoxMode.XYZWDH_ABS:
+            if to_mode == BoxMode.XYZXYZ_ABS:
+                half_sizes = arr[:, 3:6] / 2.
+                arr[:, 3:6] = arr[:, 0:3] + half_sizes
+                arr[:, 0:3] -= half_sizes
+            else:  # BoxMode.XYZLBDRFU_ABS
+                # TODO: consider rotations
+                assert "origins" in kwargs
+                origins = kwargs["origins"]
+                has_angles = arr.size(0) == 7
+                half_sizes = arr[:, 3:6] / 2.
+                p1 = arr[:, 0:3] - half_sizes
+                p2 = arr[:, 0:3] + half_sizes
+                angles = arr[:, 6] if has_angles else None
+                arr = torch.zeros(arr.size(0), 10 if has_angles else 9, dtype=arr.dtype, device=arr.device)
+                if has_angles:
+                    arr[:, 9] = angles
+                arr[:, 0:3] = origins
+                arr[:, 3:6] = origins - p1
+                arr[:, 6:9] = p2 - origins
+        elif from_mode == BoxMode.XYZXYZ_ABS:
+            if to_mode == BoxMode.XYZWDH_ABS:
+                sizes = arr[:, 3:6] - arr[:, 0:3]
+                arr[:, 0:3] += sizes / 2.
+                arr[:, 3:6] = sizes
+            else:  # BoxMode.XYZLBDRFU_ABS
+                # TODO: consider rotations
+                assert "origins" in kwargs
+                origins = kwargs["origins"]
+                has_angles = arr.size(0) == 7
+                p1 = arr[:, 0:3]
+                p2 = arr[:, 3:6]
+                angles = arr[:, 6] if has_angles else None
+                arr = torch.zeros(arr.size(0), 10 if has_angles else 9, dtype=arr.dtype, device=arr.device)
+                if has_angles:
+                    arr[:, 9] = angles
+                arr[:, 0:3] = origins
+                arr[:, 3:6] = origins - p1
+                arr[:, 6:9] = p2 - origins
+        else:  # BoxMode.XYZLBDRFU_ABS
+            # TODO: consider rotations
             has_angles = arr.size(0) == 10
             xyz = arr[:, 0:3]
             lbd = arr[:, 3:6]
@@ -103,15 +120,9 @@ class BoxMode(IntEnum):
                 sizes = p2 - p1
                 arr[:, 0:3] += sizes / 2.
                 arr[:, 3:6] = sizes
-            else:
+            else:  # BoxMode.XYZXYZ_ABS
                 arr[:, 0:3] = p1
                 arr[:, 3:6] = p2
-        else:
-            raise NotImplementedError(
-                "Conversion from BoxMode {} to {} is not supported yet".format(
-                    from_mode, to_mode
-                )
-            )
 
         if single_box:
             return original_type(arr.flatten().tolist())
@@ -122,21 +133,34 @@ class BoxMode(IntEnum):
 
 
 class Boxes(object, metaclass=ABCMeta):
-    def __init__(self, tensor: torch.Tensor):
-        self.tensor = tensor
+    def __init__(self, tensor: torch.Tensor, mode: "BoxMode" = BoxMode.XYZWDH_ABS):
+        self._tensor = tensor
+        self._mode = mode
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor, mode: "BoxMode") -> "Boxes":
         if mode == BoxMode.XYZWDH_ABS:
             return XYZWDHBoxes(tensor)
+        elif mode == BoxMode.XYZXYZ_ABS:
+            return XYZXYZBoxes(tensor)
         elif mode == BoxMode.XYZLBDRFU_ABS:
             return XYZLBDRFUBoxes(tensor)
         else:
             raise NotImplementedError
 
-    @abstractmethod
-    def convert(self, to_mode: "BoxMode"):
-        pass
+    def convert(self, to_mode: "BoxMode", **kwargs: Any) -> "Boxes":
+        if to_mode == self._mode:
+            return self
+        tensor = self.get_tensor(to_mode, **kwargs)
+        return Boxes.from_tensor(tensor, mode=to_mode)
+
+    def get_tensor(self, mode: Optional["BoxMode"] = None, **kwargs: Any) -> torch.Tensor:
+        if mode is None or mode == self._mode:
+            return self._tensor
+        else:
+            return BoxMode.convert(
+                self._tensor, from_mode=self._mode, to_mode=mode, **kwargs
+            )
 
     def clone(self) -> "Boxes":
         """
@@ -145,10 +169,10 @@ class Boxes(object, metaclass=ABCMeta):
         Returns:
             Boxes
         """
-        return type(self)(self.tensor.clone())
+        return type(self)(self._tensor.clone())
 
-    def to(self, *args: Any, **kwargs: Any):
-        return type(self)(self.tensor.to(*args, **kwargs))
+    def to(self, *args: Any, **kwargs: Any) -> "Boxes":
+        return type(self)(self._tensor.to(*args, **kwargs))
 
     @property
     @abstractmethod
@@ -163,7 +187,10 @@ class Boxes(object, metaclass=ABCMeta):
     def get_sizes(self) -> torch.Tensor:
         pass
 
-    def __getitem__(self, item):
+    def volume(self) -> torch.Tensor:
+        return self.get_sizes().prod(dim=-1)
+
+    def __getitem__(self, item) -> "Boxes":
         """
         Args:
             item: int, slice, or a BoolTensor
@@ -183,13 +210,13 @@ class Boxes(object, metaclass=ABCMeta):
         """
         cls = type(self)
         if isinstance(item, int):
-            return cls(self.tensor[item].view(1, -1))
-        b = self.tensor[item]
+            return cls(self._tensor[item].view(1, -1))
+        b = self._tensor[item]
         assert b.dim() == 2, "Indexing on Boxes with {} failed to return a matrix!".format(item)
         return cls(b)
 
     def __len__(self) -> int:
-        return self.tensor.shape[0]
+        return self._tensor.shape[0]
 
     @abstractmethod
     def __repr__(self) -> str:
@@ -214,23 +241,55 @@ class Boxes(object, metaclass=ABCMeta):
         type_cls = type(boxes_list[0])
 
         # use torch.cat (v.s. layers.cat) so the returned boxes never share storage with input
-        cat_boxes = type_cls(torch.cat([b.tensor for b in boxes_list], dim=0))
+        cat_boxes = type_cls(torch.cat([b._tensor for b in boxes_list], dim=0))
         return cat_boxes
 
     @property
     def device(self) -> torch.device:
-        return self.tensor.device
+        return self._tensor.device
 
     def __iter__(self):
         """
         Yield a box as a Tensor of shape (6/7,) at a time.
         """
-        yield from self.tensor
+        yield from self._tensor
+
+
+class XYZXYZBoxes(Boxes):
+
+    def __init__(self, tensor: torch.Tensor):
+        """
+        Args:
+            tensor (Tensor[float]): a Nxk matrix, where k = 6 or 7.
+            Each row is (x0, y0, z0, x1, y1, z1, [angle]).
+        """
+        device = tensor.device if isinstance(tensor, torch.Tensor) else torch.device("cpu")
+        tensor = torch.as_tensor(tensor, dtype=torch.float32, device=device)
+        if tensor.numel() == 0:
+            # Use reshape, so we don't end up creating a new tensor that does not depend on
+            # the inputs (and consequently confuses jit)
+            tensor = tensor.reshape((0, 7)).to(dtype=torch.float32, device=device)
+        assert tensor.dim() == 2 and (tensor.size(-1) == 7 or tensor.size(-1) == 6), tensor.size()
+
+        super().__init__(tensor, mode=BoxMode.XYZXYZ_ABS)
+
+    @property
+    def with_angle(self) -> bool:
+        return self._tensor.size(-1) == 7
+
+    def get_centers(self) -> torch.Tensor:
+        return (self._tensor[:, 0:3] + self._tensor[:, 3:6]) / 2.
+
+    def get_sizes(self) -> torch.Tensor:
+        return self._tensor[:, 3:6] - self._tensor[:, 0:3]
+
+    def __repr__(self) -> str:
+        return f"XYZXYZBoxes({str(self._tensor)})"
 
 
 class XYZWDHBoxes(Boxes):
 
-    def __init__(self, tensor: torch.Tensor, angles: Optional[torch.Tensor] = None):
+    def __init__(self, tensor: torch.Tensor):
         """
         Args:
             tensor (Tensor[float]): a Nxk matrix, where k = 6 or 7.
@@ -244,30 +303,20 @@ class XYZWDHBoxes(Boxes):
             tensor = tensor.reshape((0, 7)).to(dtype=torch.float32, device=device)
         assert tensor.dim() == 2 and (tensor.size(-1) == 7 or tensor.size(-1) == 6), tensor.size()
 
-        super().__init__(tensor)
-
-    def convert(self, to_mode: "BoxMode", **kwargs: Dict[str, Any]):
-        if to_mode == BoxMode.XYZLBDRFU_ABS:
-            assert "origins" in kwargs
-            boxes = BoxMode.convert(
-                self.tensor, from_mode=BoxMode.XYZWDH_ABS, to_mode=BoxMode.XYZLBDRFU_ABS, **kwargs
-            )
-            return XYZLBDRFUBoxes(boxes)
-        else:
-            raise NotImplementedError
+        super().__init__(tensor, mode=BoxMode.XYZWDH_ABS)
 
     @property
     def with_angle(self) -> bool:
-        return self.tensor.size(-1) == 7
+        return self._tensor.size(-1) == 7
 
     def get_centers(self) -> torch.Tensor:
-        return self.tensor[:, 0:3]
+        return self._tensor[:, 0:3]
 
     def get_sizes(self) -> torch.Tensor:
-        return self.tensor[:, 3:6]
+        return self._tensor[:, 3:6]
 
     def __repr__(self) -> str:
-        return f"XYZWDHBoxes({str(self.tensor)})"
+        return f"XYZWDHBoxes({str(self._tensor)})"
 
 
 class XYZLBDRFUBoxes(Boxes):
@@ -286,20 +335,11 @@ class XYZLBDRFUBoxes(Boxes):
             tensor = tensor.reshape((0, 9)).to(dtype=torch.float32, device=device)
         assert tensor.dim() == 2 and (tensor.size(-1) == 10 or tensor.size(-1) == 9), tensor.size()
 
-        super().__init__(tensor)
-
-    def convert(self, to_mode: "BoxMode"):
-        if to_mode == BoxMode.XYZWDH_ABS:
-            boxes = BoxMode.convert(
-                self.tensor, from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZWDH_ABS
-            )
-            return XYZWDHBoxes(boxes)
-        else:
-            raise NotImplementedError
+        super().__init__(tensor, mode=BoxMode.XYZLBDRFU_ABS)
 
     @property
     def with_angle(self) -> bool:
-        return self.tensor.size(-1) == 10
+        return self._tensor.size(-1) == 10
 
     def get_centers(self) -> torch.Tensor:
         return self.convert(BoxMode.XYZWDH_ABS).get_centers()
@@ -308,4 +348,50 @@ class XYZLBDRFUBoxes(Boxes):
         return self.convert(BoxMode.XYZWDH_ABS).get_sizes()
 
     def __repr__(self) -> str:
-        return f"XYZLBDRFUBoxes({str(self.tensor)})"
+        return f"XYZLBDRFUBoxes({str(self._tensor)})"
+
+
+def pairwise_intersection(boxes1: "Boxes", boxes2: "Boxes") -> torch.Tensor:
+    """
+    Given two lists of boxes of size N and M,
+    compute the intersection area between __all__ N x M pairs of boxes.
+
+    Args:
+        boxes1,boxes2 (Boxes): two `Boxes`. Contains N & M boxes, respectively.
+
+    Returns:
+        Tensor: intersection, sized [N, M].
+    """
+    boxes1 = boxes1.get_tensor(BoxMode.XYZXYZ_ABS)
+    boxes2 = boxes2.get_tensor(BoxMode.XYZXYZ_ABS)
+    width_depth_height = torch.min(boxes1[:, None, 3:6], boxes2[:, 3:6]) - torch.max(
+        boxes1[:, None, 0:3], boxes2[:, 0:3]
+    )  # [N, M, 3]
+
+    width_depth_height.clamp_(min=0)  # [N, M, 3]
+    intersection = width_depth_height.prod(dim=-1)  # [N, M]
+    return intersection
+
+
+def pairwise_iou(boxes1: "Boxes", boxes2: "Boxes") -> torch.Tensor:
+    """
+    Given two lists of boxes of size N and M,
+    compute the IoU (intersection over union)
+    between __all__ N x M pairs of boxes.
+    Args:
+        boxes1,boxes2 (Boxes): two `Boxes`. Contains N & M boxes, respectively.
+
+    Returns:
+        Tensor: IoU, sized [N, M].
+    """
+    vol1 = boxes1.volume()  # [N]
+    vol2 = boxes2.volume()  # [M]
+    inter = pairwise_intersection(boxes1, boxes2)
+
+    # handle empty boxes
+    iou = torch.where(
+        inter > 0,
+        inter / (vol1[:, None] + vol2 - inter),
+        torch.zeros(1, dtype=inter.dtype, device=inter.device),
+    )
+    return iou

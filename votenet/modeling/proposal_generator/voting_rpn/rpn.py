@@ -229,7 +229,7 @@ class VotingRPN(nn.Module):
             gt_classes_i[dists >= threshold] = self.num_classes  # background
 
             gt_boxes_i = gt_instances_i.gt_boxes[inds, :]
-            gt_boxes_i = gt_boxes_i.convert(BoxMode.XYZLBDRFU_ABS, origins=proposal_xyz_i).tensor
+            gt_boxes_i = gt_boxes_i.get_tensor(BoxMode.XYZLBDRFU_ABS, origins=proposal_xyz_i)
 
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)

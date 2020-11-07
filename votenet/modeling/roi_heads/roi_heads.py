@@ -115,7 +115,7 @@ class StandardROIHeads(nn.Module):
 
         pred_scores, pred_classes = pred_cls_logits.detach().sigmoid().max(dim=1)
 
-        pred_boxes = torch.stack([x.pred_boxes.tensor for x in proposals])
+        pred_boxes = torch.stack([x.pred_boxes.get_tensor() for x in proposals])
         pred_box_deltas = torch.gather(
             pred_box_deltas.detach(), dim=2, index=pred_classes.view(batch_size, num_proposals, 1, 1).repeat(1, 1, 1, 6)
         ).view(batch_size, num_proposals, 6)
@@ -137,13 +137,13 @@ class StandardROIHeads(nn.Module):
                 pred_boxes_i, mode=BoxMode.XYZLBDRFU_ABS
             ).convert(BoxMode.XYZWDH_ABS)
 
-            # TODO:
-            keep = batch_nms_3d(pred_boxes_i, pred_scores_i)
+            # TODO: batch_nms_3d
+            # keep = batch_nms_3d(pred_boxes_i, pred_scores_i)
 
             instances_i = Instances()
             instances_i.pred_classes = pred_classes_i
-            instances_i.pred_scores = pred_scores_i
             instances_i.pred_boxes = pred_boxes_i
+            instances_i.scores = pred_scores_i
 
             instances.append(instances_i)
 
@@ -161,8 +161,8 @@ class StandardROIHeads(nn.Module):
         normalizer = batch_size * num_proposals
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
-        gt_boxes = torch.stack([x.gt_boxes.tensor[:, 3:9] for x in proposals])
-        pred_boxes = torch.stack([x.pred_boxes.tensor[:, 3:9] for x in proposals])
+        gt_boxes = torch.stack([x.gt_boxes.get_tensor()[:, 3:9] for x in proposals])
+        pred_boxes = torch.stack([x.pred_boxes.get_tensor()[:, 3:9] for x in proposals])
         gt_box_deltas = gt_boxes - pred_boxes
 
         losses = {}

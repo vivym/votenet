@@ -108,10 +108,20 @@ class GeneralizedVoteNet(nn.Module):
             assert "proposals" in batched_inputs[0]
             proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
-        results, _ = self.roi_heads(seed_xyz, seed_features, voted_features, proposals)
+        instances, _ = self.roi_heads(seed_xyz, seed_features, voted_features, proposals)
 
-        return results
+        return GeneralizedVoteNet._postprocess(instances)
 
     def preprocess_points(self, batched_inputs):
         points = [x["points"].to(self.device) for x in batched_inputs]
         return torch.stack(points)
+
+    @staticmethod
+    def _postprocess(instances):
+        results = []
+        for instances_i in instances:
+            # TODO: do postprocessing
+            results.append({
+                "instances": instances_i,
+            })
+        return results

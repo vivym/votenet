@@ -38,7 +38,7 @@ class Trainer(DefaultTrainer):
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
         if evaluator_type == "point_cloud":
-            evaluator_list.append(PointCloudEvaluation(dataset_name, cfg, True, output_folder))
+            evaluator_list.append(PointCloudEvaluation(dataset_name, True, output_folder))
         if len(evaluator_list) == 0:
             raise NotImplementedError(
                 "no Evaluator for the dataset {} with the type {}".format(
