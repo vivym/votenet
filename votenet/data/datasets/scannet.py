@@ -17,7 +17,7 @@ def register_scannet_instances(name, split_file, data_root):
     # 2. Optionally, add metadata about this dataset,
     # since they might be useful in evaluation, visualization or logging
     MetadataCatalog.get(name).set(
-        split_file=split_file, data_root=data_root, evaluator_type="point_cloud"
+        split_file=split_file, data_root=data_root, evaluator_type="point_cloud_det"
     )
 
 

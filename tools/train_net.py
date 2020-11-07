@@ -37,7 +37,7 @@ class Trainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
-        if evaluator_type == "point_cloud":
+        if evaluator_type == "point_cloud_det":
             evaluator_list.append(PointCloudEvaluation(dataset_name, True, output_folder))
         if len(evaluator_list) == 0:
             raise NotImplementedError(
