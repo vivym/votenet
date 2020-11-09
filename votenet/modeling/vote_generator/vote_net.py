@@ -1,3 +1,4 @@
+import fvcore.nn.weight_init as weight_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +25,13 @@ class VotingModule(nn.Module):
         self.conv3 = torch.nn.Conv1d(self.in_dim, (3 + self.out_dim) * self.vote_factor, 1)
         self.bn1 = torch.nn.BatchNorm1d(self.in_dim)
         self.bn2 = torch.nn.BatchNorm1d(self.in_dim)
+
+        for layer in [self.conv1, self.conv2]:
+            weight_init.c2_msra_fill(layer)
+
+        nn.init.normal_(self.conv3.weight, std=0.001)
+        if self.conv3.bias is not None:
+            nn.init.constant_(self.conv3.bias, 0)
 
     def forward(self, seed_xyz, seed_features):
         """ Forward pass.

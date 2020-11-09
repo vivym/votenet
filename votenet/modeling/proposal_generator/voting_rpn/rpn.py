@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -56,15 +56,15 @@ class VotingRPN(nn.Module):
             assert gt_instances is not None, "RPN requires gt_instances in training!"
             gt_labels, gt_classes, gt_boxes = self.label_and_sample_proposals(voted_xyz, gt_instances)
             if pred_heading_cls_logits is not None:
-                assert gt_boxes.size(-1) == 7
+                assert gt_boxes.size(-1) == 7 or gt_boxes.size(-1) == 10
                 gt_heading_classes, gt_heading_deltas = self.compute_gt_angles(gt_boxes)
             else:
                 gt_heading_classes, gt_heading_deltas = None, None
-            losses = self.loss_instances(
+            losses = self.losses(
                 pred_objectness_logits, gt_labels,
                 pred_box_reg, gt_boxes,
-                pred_heading_cls_logits, pred_heading_deltas,
-                gt_heading_classes, gt_heading_deltas,
+                pred_heading_cls_logits, gt_heading_classes,
+                pred_heading_deltas, gt_heading_deltas,
             )
         else:
             gt_classes = None
@@ -111,12 +111,12 @@ class VotingRPN(nn.Module):
 
         proposals = []
         for i, (pred_objectness_i, pred_origins_i, pred_box_reg_i) in enumerate(zip(
-                pred_objectness, proposal_xyz, pred_box_reg
+                pred_objectness, proposal_xyz.detach(), pred_box_reg.detach()
         )):
             instances = Instances()
             instances.pred_objectness = pred_objectness_i
             instances.pred_boxes = Boxes.from_tensor(
-                torch.cat([pred_origins_i.detach(), pred_box_reg_i.detach()], dim=-1),
+                torch.cat([pred_origins_i, pred_box_reg_i], dim=-1),
                 mode=BoxMode.XYZLBDRFU_ABS,
             )
             if pred_heading_angles is not None:
@@ -146,13 +146,14 @@ class VotingRPN(nn.Module):
         return gt_heading_classes.long(), gt_heading_deltas
 
     @torch.jit.unused
-    def loss_instances(
-            self, pred_objectness_logits: torch.Tensor, gt_labels: torch.Tensor,
+    def losses(
+            self,
+            pred_objectness_logits: torch.Tensor, gt_labels: torch.Tensor,
             pred_box_reg: torch.Tensor, gt_boxes: torch.Tensor,
-            pred_heading_cls_logits: Optional[torch.Tensor] = None,
-            pred_heading_deltas: Optional[torch.Tensor] = None,
-            gt_heading_classes: Optional[torch.Tensor] = None,
-            gt_heading_deltas: Optional[torch.Tensor] = None,
+            pred_heading_cls_logits: Optional[torch.Tensor],
+            gt_heading_classes: Optional[torch.Tensor],
+            pred_heading_deltas: Optional[torch.Tensor],
+            gt_heading_deltas: Optional[torch.Tensor],
     ):
         batch_size = pred_objectness_logits.size(0)
         num_proposals = pred_objectness_logits.size(-1)
@@ -179,7 +180,7 @@ class VotingRPN(nn.Module):
         losses["loss_rpn_loc"] = huber_loss(
             pred_box_reg[pos_mask],
             gt_box_reg[pos_mask],
-            beta=1.0,
+            beta=0.15,
             reduction="sum",
         ) / normalizer
 
@@ -224,8 +225,10 @@ class VotingRPN(nn.Module):
             gt_classes_i = gt_classes_i[inds]
             gt_sizes_i = gt_sizes_i[inds, :]
             threshold = torch.mean(gt_sizes_i, dim=1) / 2 * (2 / 3)
+            threshold = threshold ** 2
             gt_labels_i = torch.zeros(num_proposals, dtype=torch.int64, device=device)
             gt_labels_i[dists < threshold] = 1
+            # TODO: gt_labels_i[dists < threshold2] = -1
             gt_classes_i[dists >= threshold] = self.num_classes  # background
 
             gt_boxes_i = gt_instances_i.gt_boxes[inds, :]

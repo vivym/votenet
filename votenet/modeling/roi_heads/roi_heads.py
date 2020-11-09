@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -151,19 +152,22 @@ class StandardROIHeads(nn.Module):
 
     def losses(
             self,
-            pred_cls_logits: torch.Tensor,  # (bs, c, num_proposals)
-            pred_box_deltas: torch.Tensor,  # (bs, num_proposals, 6)
-            pred_heading_deltas: Optional[torch.Tensor],
+            pred_cls_logits: torch.Tensor,  # (bs, num_classes + 1, num_proposals)
+            pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes * 6)
+            pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
     ):
         batch_size = pred_cls_logits.size(0)
         num_proposals = pred_cls_logits.size(-1)
         normalizer = batch_size * num_proposals
+        device = pred_cls_logits.device
+        dtype = pred_cls_logits.dtype
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
         gt_boxes = torch.stack([x.gt_boxes.get_tensor()[:, 3:9] for x in proposals])
         pred_boxes = torch.stack([x.pred_boxes.get_tensor()[:, 3:9] for x in proposals])
         gt_box_deltas = gt_boxes - pred_boxes
+        box_dim = gt_boxes.size(-1)
 
         losses = {}
         losses["loss_cls"] = F.cross_entropy(
@@ -172,28 +176,25 @@ class StandardROIHeads(nn.Module):
             reduction="sum",
         ) / normalizer
 
-        fg_mask = gt_classes < self.num_classes
-        pred_box_deltas = torch.gather(
-            pred_box_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1, 1).repeat(1, 1, 1, 6)
-        ).view(batch_size, num_proposals, 6)
+        fg_inds = torch.nonzero(
+            (gt_classes >= 0) & (gt_classes < self.num_classes), as_tuple=True
+        )
+        fg_gt_classes = gt_classes[fg_inds]   # (num_fg,)
         # TODO: configurable
-        losses["loss_box_reg"] = huber_loss(
-            pred_box_deltas[fg_mask, :],
-            gt_box_deltas[fg_mask, :],
-            beta=0.15,
+        losses["loss_box_loc"] = huber_loss(
+            pred_box_deltas[fg_inds + (fg_gt_classes, )],
+            gt_box_deltas[fg_inds],
+            beta=0.5,
             reduction="sum",
         ) / normalizer
 
-        if pred_heading_deltas is not  None:
+        if pred_heading_deltas is not None:
             gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])
 
-            pred_heading_deltas = torch.gather(
-                pred_heading_deltas, dim=2, index=gt_classes.view(batch_size, num_proposals, 1)
-            ).view(batch_size, num_proposals)
             losses["loss_angle_reg"] = huber_loss(
-                pred_heading_deltas[fg_mask],
-                gt_heading_deltas[fg_mask],
-                beta=1.0,
+                pred_heading_deltas[fg_inds + (fg_gt_classes, )],
+                gt_heading_deltas[fg_inds],
+                beta=np.pi / 12.,
                 reduction="sum",
             ) / normalizer
 

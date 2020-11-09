@@ -1,10 +1,9 @@
-from typing import List
+from typing import Optional
 
 import torch
 from torch import nn
 
 from votenet.config import configurable
-from votenet.structures import Instances
 
 from ..backbone import Backbone, build_backbone
 from ..vote_generator import build_vote_generator
@@ -21,7 +20,7 @@ class GeneralizedVoteNet(nn.Module):
             *,
             backbone: Backbone,
             vote_generator: nn.Module,
-            proposal_generator: nn.Module,
+            proposal_generator: Optional[nn.Module],
             roi_heads: nn.Module,
     ):
         super().__init__()
@@ -69,7 +68,7 @@ class GeneralizedVoteNet(nn.Module):
             seed_xyz, seed_features, seed_inds, gt_point_votes, gt_point_votes_mask
         )
 
-        if self.proposal_generator:
+        if self.proposal_generator is not None:
             proposals, proposal_losses = self.proposal_generator(
                 voted_xyz, voted_features, gt_instances
             )
@@ -96,11 +95,11 @@ class GeneralizedVoteNet(nn.Module):
         seed_features = features["fp2"]["features"]
         seed_inds = features["fp2"]["inds"]
 
-        voted_xyz, voted_features, voted_inds, vote_losses = self.vote_generator(
+        voted_xyz, voted_features, voted_inds, _ = self.vote_generator(
             seed_xyz, seed_features, seed_inds
         )
 
-        if self.proposal_generator:
+        if self.proposal_generator is not None:
             proposals, _ = self.proposal_generator(
                 voted_xyz, voted_features
             )

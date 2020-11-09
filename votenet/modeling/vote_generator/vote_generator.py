@@ -72,7 +72,7 @@ class StandardVoteGenerator(nn.Module):
         for seed_inds_i, gt_votes_i, gt_votes_mask_i in zip(seed_inds, gt_votes, gt_votes_mask):
             gt_votes_list.append(gt_votes_i[seed_inds_i, :])
             gt_votes_mask_list.append(gt_votes_mask_i[seed_inds_i])
-        gt_votes = torch.stack(gt_votes_list) + seed_xyz.repeat(1, 1, 3)
+        gt_votes = seed_xyz.repeat(1, 1, 3) + torch.stack(gt_votes_list)
         gt_votes_mask = torch.stack(gt_votes_mask_list)
 
         # bs, num_seeds, vote_factor*3

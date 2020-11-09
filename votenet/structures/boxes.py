@@ -67,13 +67,14 @@ class BoxMode(IntEnum):
         if from_mode == BoxMode.XYZWDH_ABS:
             if to_mode == BoxMode.XYZXYZ_ABS:
                 half_sizes = arr[:, 3:6] / 2.
-                arr[:, 3:6] = arr[:, 0:3] + half_sizes
-                arr[:, 0:3] -= half_sizes
+                centers = arr[:, 0:3]
+                arr[:, 0:3] = centers - half_sizes
+                arr[:, 3:6] = centers + half_sizes
             else:  # BoxMode.XYZLBDRFU_ABS
                 # TODO: consider rotations
                 assert "origins" in kwargs
                 origins = kwargs["origins"]
-                has_angles = arr.size(0) == 7
+                has_angles = arr.size(-1) == 7
                 half_sizes = arr[:, 3:6] / 2.
                 p1 = arr[:, 0:3] - half_sizes
                 p2 = arr[:, 0:3] + half_sizes
@@ -93,7 +94,7 @@ class BoxMode(IntEnum):
                 # TODO: consider rotations
                 assert "origins" in kwargs
                 origins = kwargs["origins"]
-                has_angles = arr.size(0) == 7
+                has_angles = arr.size(-1) == 7
                 p1 = arr[:, 0:3]
                 p2 = arr[:, 3:6]
                 angles = arr[:, 6] if has_angles else None
@@ -105,20 +106,20 @@ class BoxMode(IntEnum):
                 arr[:, 6:9] = p2 - origins
         else:  # BoxMode.XYZLBDRFU_ABS
             # TODO: consider rotations
-            has_angles = arr.size(0) == 10
-            xyz = arr[:, 0:3]
+            has_angles = arr.size(-1) == 10
+            origins = arr[:, 0:3]
             lbd = arr[:, 3:6]
             rfu = arr[:, 6:9]
             angles = arr[:, 9] if has_angles else None
             arr = torch.zeros(arr.size(0), 7 if has_angles else 6, dtype=arr.dtype, device=arr.device)
             if has_angles:
                 arr[:, 6] = angles
-            p1 = xyz - lbd
-            p2 = xyz + rfu
+            p1 = origins - lbd
+            p2 = origins + rfu
 
             if to_mode == BoxMode.XYZWDH_ABS:
                 sizes = p2 - p1
-                arr[:, 0:3] += sizes / 2.
+                arr[:, 0:3] = p1 + sizes / 2.
                 arr[:, 3:6] = sizes
             else:  # BoxMode.XYZXYZ_ABS
                 arr[:, 0:3] = p1
@@ -162,6 +163,10 @@ class Boxes(object, metaclass=ABCMeta):
                 self._tensor, from_mode=self._mode, to_mode=mode, **kwargs
             )
 
+    @property
+    def mode(self) -> "BoxMode":
+        return self._mode
+
     def clone(self) -> "Boxes":
         """
         Clone the Boxes.
@@ -185,6 +190,7 @@ class Boxes(object, metaclass=ABCMeta):
 
     @abstractmethod
     def get_sizes(self) -> torch.Tensor:
+        # TODO: consider rotation
         pass
 
     def volume(self) -> torch.Tensor:

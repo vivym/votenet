@@ -1,10 +1,11 @@
 from typing import List
 
+import fvcore.nn.weight_init as weight_init
 import torch
 from torch import nn
 
 from votenet.modeling.backbone import PointnetSAMoudleAgg
-from votenet.structures import Instances
+from votenet.structures import Instances, BoxMode
 
 
 class ROIGridPooler(nn.Module):
@@ -30,15 +31,20 @@ class ROIGridPooler(nn.Module):
         # Reduce feature dim
         self.reduce_dim = torch.nn.Conv1d(self.num_key_points * 32, 128, 1)
 
+        weight_init.c2_msra_fill(self.reduce_dim)
+
     def forward(self, seed_xyz: torch.Tensor, seed_features: torch.Tensor, proposals: List[Instances]):
         batch_size = len(proposals)
+        # TODO: support different number of pred_boxes
         num_proposals = len(proposals[0].pred_boxes)
-        dtype = proposals[0].pred_boxes.get_tensor().dtype
-        device = proposals[0].pred_boxes.get_tensor().device
+        dtype = seed_xyz.dtype
+        device = seed_xyz.device
 
+        # TODO: support different modes of boxes
+        assert proposals[0].pred_boxes.mode == BoxMode.XYZLBDRFU_ABS
         pred_origins = torch.stack([x.pred_boxes.get_tensor()[:, 0:3] for x in proposals])
         pred_box_reg = torch.stack([x.pred_boxes.get_tensor()[:, 3:9] for x in proposals])
-        if proposals[0].pred_boxes.with_angle:
+        if "pred_heading_angles" in proposals[0].pred_boxes:
             pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
         else:
             pred_heading_angles = torch.zeros(batch_size, num_proposals, dtype=dtype, device=device)
@@ -94,7 +100,7 @@ def rotz_batch_pytorch(t):
     :return:
     """
     input_shape = t.shape
-    output = torch.zeros(tuple(list(input_shape)+[3,3])).cuda()
+    output = torch.zeros(tuple(list(input_shape) + [3, 3])).cuda()
     c = torch.cos(t)
     s = torch.sin(t)
     # Transposed rotation matrix for x'A' = (Ax)'
@@ -124,6 +130,6 @@ def get_dense_grid_points(rois, batch_size_rcnn, grid_size):
     rois_center = rois[:, :, 0:3].view(-1, 3)  # (batch_size_rcnn, 3)
     local_rois_size = rois[:, :, 0:3] + rois[:, :, 3:6]  # (B, num_proposal, 3)
     local_rois_size = local_rois_size.view(-1, 3)  # (batch_size_rcnn, 3)
-    roi_grid_points = (dense_idx+0.5) / grid_size * local_rois_size.unsqueeze(dim=1)  # (batch_size_rcnn, gs**3, 3)
+    roi_grid_points = (dense_idx + 0.5) / grid_size * local_rois_size.unsqueeze(dim=1)  # (batch_size_rcnn, gs**3, 3)
     roi_grid_points = roi_grid_points - rois_center.unsqueeze(dim=1)  # (batch_size_rcnn, gs**3, 3)
     return roi_grid_points

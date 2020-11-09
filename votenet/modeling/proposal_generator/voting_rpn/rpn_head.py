@@ -1,3 +1,4 @@
+import fvcore.nn.weight_init as weight_init
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -23,12 +24,13 @@ class StandardRPNHead(nn.Module):
         self.use_axis_aligned_box = use_axis_aligned_box
         self.use_centerness = use_centerness
 
-        self.convs = nn.Sequential(
+        convs = [
             nn.Conv1d(128, 128, kernel_size=1),
             nn.BatchNorm1d(128),
             nn.Conv1d(128, 128, kernel_size=1),
             nn.BatchNorm1d(128),
-        )
+        ]
+        self.convs = nn.Sequential(*convs)
 
         out_channels = 1 + 6  # objectness(1) + box_reg(6)
         if not use_axis_aligned_box:
@@ -37,6 +39,14 @@ class StandardRPNHead(nn.Module):
             out_channels += 1
 
         self.predictor = nn.Conv1d(128, out_channels, kernel_size=1)
+
+        for layer in convs:
+            if isinstance(layer, nn.Conv1d):
+                weight_init.c2_msra_fill(layer)
+
+        nn.init.normal_(self.predictor.weight, std=0.001)
+        if self.predictor.bias is not None:
+            nn.init.constant_(self.predictor.bias, 0)
 
     @classmethod
     def from_config(cls, cfg):

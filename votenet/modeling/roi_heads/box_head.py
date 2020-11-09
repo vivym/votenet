@@ -1,3 +1,4 @@
+import fvcore.nn.weight_init as weight_init
 from torch import nn
 
 from votenet.config import configurable
@@ -34,25 +35,32 @@ class StandardBoxHead(nn.Module):
         self.use_axis_aligned_box = use_axis_aligned_box
         self.use_centerness = use_centerness
 
-        self.convs = nn.Sequential(
+        convs = [
             nn.Conv1d(128 + 128, 128, kernel_size=1),
             nn.BatchNorm1d(128),
             nn.Conv1d(128, 128, kernel_size=1),
             nn.BatchNorm1d(128),
-        )
-
-        out_channels = (num_classes + 1) + (num_classes + 1) * 6
-        if not use_axis_aligned_box:
-            out_channels += (num_classes + 1) * 1
-        if use_centerness:
-            out_channels += 1
+        ]
+        self.convs = nn.Sequential(*convs)
 
         self.cls_predictor = nn.Conv1d(128, num_classes + 1, kernel_size=1)
-        self.box_predictor = nn.Conv1d(128, (num_classes + 1) * 6, kernel_size=1)
+        self.box_predictor = nn.Conv1d(128, num_classes * 6, kernel_size=1)
+        predictors = [self.cls_predictor, self.box_predictor]
         if not use_axis_aligned_box:
-            self.box_angle_predictor = nn.Conv1d(128, (num_classes + 1) * 6, kernel_size=1)
+            self.box_angle_predictor = nn.Conv1d(128, num_classes * 1, kernel_size=1)
+            predictors.append(self.box_angle_predictor)
         if use_centerness:
             self.centerness_predictor = nn.Conv1d(128, 1, kernel_size=1)
+            predictors.append(self.centerness_predictor)
+
+        for layer in convs:
+            if isinstance(layer, nn.Conv1d):
+                weight_init.c2_msra_fill(layer)
+
+        for predictor in predictors:
+            nn.init.normal_(predictor.weight, std=0.001)
+            if predictor.bias is not None:
+                nn.init.constant_(predictor.bias, 0)
 
     @classmethod
     def from_config(cls, cfg):
@@ -67,19 +75,20 @@ class StandardBoxHead(nn.Module):
         num_proposals = x.size(-1)
 
         x = self.convs(x)
-        # x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
         pred_cls_logits = self.cls_predictor(x)
         pred_box_deltas = self.box_predictor(x).permute(0, 2, 1).view(
-            batch_size, num_proposals, self.num_classes + 1, 6
-        )
+            batch_size, num_proposals, self.num_classes, 6
+        )  # (bs, num_proposals, num_classes, 6)
 
         pred_heading_deltas = None
         if not self.use_axis_aligned_box:
+            # (bs, num_proposals, num_classes)
             pred_heading_deltas = self.box_angle_predictor(x).permute(0, 2, 1)
 
         pred_centerness = None
         if self.use_centerness:
-            pred_centerness = self.centerness_predictor(x).permute(0, 2, 1)
+            # (bs, num_proposals)
+            pred_centerness = self.centerness_predictor(x).view(batch_size, num_proposals)
 
         return pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness

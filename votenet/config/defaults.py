@@ -82,7 +82,7 @@ _C.MODEL.VOTE_GENERATOR.NAME = "StandardVoteGenerator"
 
 _C.MODEL.VOTE_GENERATOR.VOTE_FACTOR = 1
 _C.MODEL.VOTE_GENERATOR.SEED_FEATURE_DIM = 256
-_C.MODEL.VOTE_GENERATOR.NUM_PROPOSALS = 128
+_C.MODEL.VOTE_GENERATOR.NUM_PROPOSALS = 256
 _C.MODEL.VOTE_GENERATOR.SAMPLING_STRATEGY = "vote_fps"
 
 
@@ -99,7 +99,7 @@ _C.MODEL.PROPOSAL_GENERATOR.NAME = "VotingRPN"
 # ---------------------------------------------------------------------------- #
 _C.MODEL.RPN = CN()
 _C.MODEL.RPN.HEAD_NAME = "StandardRPNHead"  # used by RPN_HEAD_REGISTRY
-_C.MODEL.RPN.CENTERNESS = True
+_C.MODEL.RPN.CENTERNESS = False
 
 
 # ---------------------------------------------------------------------------- #
@@ -109,7 +109,7 @@ _C.MODEL.ROI_HEADS = CN()
 _C.MODEL.ROI_HEADS.NAME = "StandardROIHeads"
 # Number of foreground classes
 _C.MODEL.ROI_HEADS.NUM_CLASSES = 18
-_C.MODEL.ROI_HEADS.CENTERNESS = True
+_C.MODEL.ROI_HEADS.CENTERNESS = False
 _C.MODEL.ROI_HEADS.SEED_FEATURE_DIM = 256
 _C.MODEL.ROI_HEADS.GRID_SIZE = 3
 _C.MODEL.ROI_HEADS.USE_EXP = True
@@ -129,6 +129,8 @@ _C.SOLVER = CN()
 
 # See votenet/solver/build.py for LR scheduler options
 _C.SOLVER.LR_SCHEDULER_NAME = "WarmupMultiStepLR"
+
+_C.SOLVER.OPTIMIZER_NAME = "SGD"
 
 _C.SOLVER.MAX_ITER = 40000
 
