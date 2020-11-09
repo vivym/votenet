@@ -160,14 +160,11 @@ class StandardROIHeads(nn.Module):
         batch_size = pred_cls_logits.size(0)
         num_proposals = pred_cls_logits.size(-1)
         normalizer = batch_size * num_proposals
-        device = pred_cls_logits.device
-        dtype = pred_cls_logits.dtype
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
         gt_boxes = torch.stack([x.gt_boxes.get_tensor()[:, 3:9] for x in proposals])
         pred_boxes = torch.stack([x.pred_boxes.get_tensor()[:, 3:9] for x in proposals])
         gt_box_deltas = gt_boxes - pred_boxes
-        box_dim = gt_boxes.size(-1)
 
         losses = {}
         losses["loss_cls"] = F.cross_entropy(
