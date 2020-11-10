@@ -2,6 +2,7 @@
 #include "ball_query/ball_query.h"
 #include "box_iou_rotated/box_iou_rotated.h"
 #include "group_points/group_points.h"
+#include "nms_3d/nms_3d.h"
 #include "nms_rotated/nms_rotated.h"
 #include "sampling/sampling.h"
 #include "three_interpolate/interpolate.h"
@@ -75,6 +76,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
   m.def("group_points_forward", &group_points_forward, "group_points_forward");
   m.def("group_points_backward", &group_points_backward, "group_points_backward");
+
+  m.def("nms_3d", &nms_3d, "NMS for 3d boxes");
 
   m.def("nms_rotated", &nms_rotated, "NMS for rotated boxes");
 

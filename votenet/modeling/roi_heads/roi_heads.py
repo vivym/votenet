@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
-from votenet.layers import huber_loss
+from votenet.layers import huber_loss, batched_nms_3d
 from votenet.utils.registry import Registry
 from votenet.structures import Instances, Boxes, BoxMode
 
@@ -106,41 +106,72 @@ class StandardROIHeads(nn.Module):
     @torch.no_grad()
     def predict_instances(
             self,
-            pred_cls_logits: torch.Tensor,  # (bs, c, num_proposals)
-            pred_box_deltas: torch.Tensor,
-            pred_heading_deltas: Optional[torch.Tensor],
+            pred_cls_logits: torch.Tensor,  # (bs, num_classes, num_proposals)
+            pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes, 6)
+            pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
     ):
-        pred_scores, pred_classes = pred_cls_logits.detach().sigmoid().max(dim=1)
+        # (bs, num_classes, num_proposals) -> (bs, num_proposals, num_classes)
+        scores = F.softmax(pred_cls_logits, dim=-2).permute(0, 2, 1)
 
         instances = []
-        for i, (pred_scores_i, pred_classes_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
-                pred_scores, pred_classes, pred_box_deltas.detach(), proposals
+        for i, (scores_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
+                scores, pred_box_deltas.detach(), proposals
         )):
-            fg_mask = (pred_classes_i >= 0) & (pred_classes_i < self.num_classes)
-            fg_pred_classes = pred_classes_i[fg_mask]
-            # TODO: add angles to boxes
-            pred_boxes_i = proposals_i.proposal_boxes.get_tensor()[fg_mask]
-            pred_box_deltas_i = pred_box_deltas_i[fg_mask, fg_pred_classes]
-            pred_boxes_i[..., 3:9] += pred_box_deltas_i
+            # (num_proposals, 9)
+            proposal_boxes_i = proposals_i.proposal_boxes.get_tensor(BoxMode.XYZLBDRFU_ABS)
+            # (num_proposals, num_classes, 6)
+            pred_boxes_i = proposal_boxes_i[:, None, 3:9] + pred_box_deltas_i
+            # (num_proposals, num_classes, 9)
+            pred_boxes_i = torch.cat(
+                [
+                    proposal_boxes_i[:, None, 0:3].repeat(1, self.num_classes, 1),
+                    pred_boxes_i,
+                ],
+                dim=-1,
+            ).contiguous()
+
+            pred_boxes_i = BoxMode.convert(
+                pred_boxes_i.view(-1, 9), from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZXYZ_ABS
+            ).view(-1, self.num_classes, 6)
+            # (num_proposals, num_classes + 1) -> (num_proposals, num_classes)
+            scores_i = scores_i[:, :-1]
+
+            # 1. Filter results based on detection scores. It can make NMS more efficient
+            #    by filtering out low-confidence detections.
+            # TODO: make it configurable
+            filter_mask = scores_i > 0.05  # score_thresh  # R x K
+            # R' x 2. First column contains indices of the R predictions;
+            # Second column contains indices of classes.
+            filter_inds = filter_mask.nonzero(as_tuple=False)
+            pred_boxes_i = pred_boxes_i[filter_mask]
+            scores_i = scores_i[filter_mask]
+
+            # 2. Apply NMS for each class independently.
+            # TODO: make it configurable
+            keep = batched_nms_3d(pred_boxes_i, scores_i, filter_inds[:, 1], 0.25)
+            """
+            topk_per_image = 256
+            if topk_per_image >= 0:
+                keep = keep[:topk_per_image]
+            """
+            pred_boxes_i, scores_i, filter_inds = pred_boxes_i[keep], scores_i[keep], filter_inds[keep]
 
             if pred_heading_deltas is not None:
+                """
                 pred_heading_angles_i = proposals_i.pred_heading_angles
                 pred_heading_deltas_i = pred_heading_deltas[i].detach()[fg_mask, fg_pred_classes]
                 pred_heading_angles_i += pred_heading_deltas_i
                 pred_boxes_i = torch.cat([pred_boxes_i, pred_heading_angles_i], dim=-1)
+                """
+                raise NotImplementedError
 
-            pred_boxes_i = Boxes.from_tensor(
-                pred_boxes_i, mode=BoxMode.XYZLBDRFU_ABS
-            ).convert(BoxMode.XYZWDH_ABS)
-
-            # TODO: batch_nms_3d
-            # keep = batch_nms_3d(pred_boxes_i, pred_scores_i)
+            pred_boxes_i = Boxes.from_tensor(pred_boxes_i, mode=BoxMode.XYZXYZ_ABS)
 
             instances_i = Instances()
-            instances_i.pred_classes = pred_classes_i[fg_mask]
-            instances_i.pred_boxes = pred_boxes_i
-            instances_i.scores = pred_scores_i[fg_mask]
+            instances_i.pred_classes = filter_inds[:, 1]
+            instances_i.pred_boxes = pred_boxes_i.convert(BoxMode.XYZWDH_ABS)
+            instances_i.scores = scores_i
             instances.append(instances_i)
 
         return instances
@@ -165,8 +196,8 @@ class StandardROIHeads(nn.Module):
         losses["loss_cls"] = F.cross_entropy(
             pred_cls_logits,
             gt_classes,
-            reduction="sum",
-        ) / normalizer
+            reduction="mean",
+        )
 
         fg_inds = torch.nonzero(
             (gt_classes >= 0) & (gt_classes < self.num_classes), as_tuple=True
