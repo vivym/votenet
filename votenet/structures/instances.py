@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple, Union
 import torch
 
 
-class Instances:
+class Instances(object):
     """
     This class represents a list of instances in an image/scene.
     It stores the attributes of instances (e.g., boxes, masks, labels, scores) as "fields".

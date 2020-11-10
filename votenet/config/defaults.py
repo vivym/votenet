@@ -83,7 +83,7 @@ _C.MODEL.VOTE_GENERATOR.NAME = "StandardVoteGenerator"
 _C.MODEL.VOTE_GENERATOR.VOTE_FACTOR = 1
 _C.MODEL.VOTE_GENERATOR.SEED_FEATURE_DIM = 256
 _C.MODEL.VOTE_GENERATOR.NUM_PROPOSALS = 256
-_C.MODEL.VOTE_GENERATOR.SAMPLING_STRATEGY = "vote_fps"
+_C.MODEL.VOTE_GENERATOR.SAMPLING_STRATEGY = "seed_fps"
 
 
 # ---------------------------------------------------------------------------- #

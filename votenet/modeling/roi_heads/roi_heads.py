@@ -118,22 +118,18 @@ class StandardROIHeads(nn.Module):
         for i, (scores_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
                 scores, pred_box_deltas.detach(), proposals
         )):
-            # (num_proposals, 9)
+            # (num_proposals, 6)
             proposal_boxes_i = proposals_i.proposal_boxes.get_tensor(BoxMode.XYZLBDRFU_ABS)
             # (num_proposals, num_classes, 6)
-            pred_boxes_i = proposal_boxes_i[:, None, 3:9] + pred_box_deltas_i
-            # (num_proposals, num_classes, 9)
-            pred_boxes_i = torch.cat(
-                [
-                    proposal_boxes_i[:, None, 0:3].repeat(1, self.num_classes, 1),
-                    pred_boxes_i,
-                ],
-                dim=-1,
-            ).contiguous()
+            pred_boxes_i = proposal_boxes_i[:, None, :] + pred_box_deltas_i
+            # (num_proposals, num_classes, 6)
+            pred_origins = proposals_i.proposal_boxes.get("origins").repeat(1, self.num_classes, 1)
 
-            pred_boxes_i = BoxMode.convert(
-                pred_boxes_i.view(-1, 9), from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZXYZ_ABS
-            ).view(-1, self.num_classes, 6)
+            pred_boxes_i, _ = BoxMode.convert(
+                pred_boxes_i.view(-1, 6), from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZXYZ_ABS,
+                origins=pred_origins,
+            )
+            pred_boxes_i = pred_boxes_i.view(-1, self.num_classes, 6)
             # (num_proposals, num_classes + 1) -> (num_proposals, num_classes)
             scores_i = scores_i[:, :-1]
 
@@ -188,8 +184,8 @@ class StandardROIHeads(nn.Module):
         normalizer = batch_size * num_proposals
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
-        gt_boxes = torch.stack([x.gt_boxes.get_tensor()[:, 3:9] for x in proposals])
-        proposal_boxes = torch.stack([x.proposal_boxes.get_tensor()[:, 3:9] for x in proposals])
+        gt_boxes = torch.stack([x.gt_boxes.get_tensor() for x in proposals])
+        proposal_boxes = torch.stack([x.proposal_boxes.get_tensor() for x in proposals])
         gt_box_deltas = gt_boxes - proposal_boxes
 
         losses = {}

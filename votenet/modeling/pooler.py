@@ -42,8 +42,8 @@ class ROIGridPooler(nn.Module):
 
         # TODO: support different modes of boxes
         assert proposals[0].proposal_boxes.mode == BoxMode.XYZLBDRFU_ABS
-        pred_origins = torch.stack([x.proposal_boxes.get_tensor()[:, 0:3] for x in proposals])
-        pred_box_reg = torch.stack([x.proposal_boxes.get_tensor()[:, 3:9] for x in proposals])
+        pred_origins = torch.stack([x.proposal_boxes.get("origins") for x in proposals])
+        pred_box_reg = torch.stack([x.proposal_boxes.get_tensor() for x in proposals])
         if "pred_heading_angles" in proposals[0].proposal_boxes:
             pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
         else:

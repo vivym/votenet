@@ -56,7 +56,7 @@ class VotingRPN(nn.Module):
             assert gt_instances is not None, "RPN requires gt_instances in training!"
             gt_labels, gt_classes, gt_boxes = self.label_and_sample_proposals(voted_xyz, gt_instances)
             if pred_heading_cls_logits is not None:
-                assert gt_boxes.size(-1) == 7 or gt_boxes.size(-1) == 10
+                assert all(b.has("angles") for b in gt_boxes)
                 gt_heading_classes, gt_heading_deltas = self.compute_gt_angles(gt_boxes)
             else:
                 gt_heading_classes, gt_heading_deltas = None, None
@@ -116,8 +116,9 @@ class VotingRPN(nn.Module):
             instances = Instances()
             instances.pred_objectness = pred_objectness_i
             instances.proposal_boxes = Boxes.from_tensor(
-                torch.cat([pred_origins_i, pred_box_reg_i], dim=-1),
+                pred_box_reg_i,
                 mode=BoxMode.XYZLBDRFU_ABS,
+                origins=pred_origins_i,
             )
             if pred_heading_angles is not None:
                 instances.pred_heading_angles = pred_heading_angles[i]
@@ -136,8 +137,8 @@ class VotingRPN(nn.Module):
         return proposals
 
     @torch.no_grad()
-    def compute_gt_angles(self, gt_boxes: torch.Tensor):
-        gt_angles = gt_boxes[..., -1] % (2 * np.pi)
+    def compute_gt_angles(self, gt_boxes: ["Boxes"]):
+        gt_angles = gt_boxes.get("angles") % (2 * np.pi)
         angle_per_bin = 2 * np.pi / 12
         shifted_angles = (gt_angles + angle_per_bin / 2) % (2 * np.pi)
         gt_heading_classes = shifted_angles / angle_per_bin
@@ -208,7 +209,7 @@ class VotingRPN(nn.Module):
     @torch.no_grad()
     def label_and_sample_proposals(
             self, proposal_xyz: torch.Tensor, gt_instances: List[Instances]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, List["Boxes"]]:
         device = proposal_xyz.device
         num_proposals = proposal_xyz.size(1)
 
@@ -232,7 +233,7 @@ class VotingRPN(nn.Module):
             gt_classes_i[dists >= threshold] = self.num_classes  # background
 
             gt_boxes_i = gt_instances_i.gt_boxes[inds, :]
-            gt_boxes_i = gt_boxes_i.get_tensor(BoxMode.XYZLBDRFU_ABS, origins=proposal_xyz_i)
+            gt_boxes_i = gt_boxes_i.convert(BoxMode.XYZLBDRFU_ABS, origins=proposal_xyz_i)
 
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)
@@ -240,6 +241,5 @@ class VotingRPN(nn.Module):
 
         gt_labels = torch.stack(gt_labels)
         gt_classes = torch.stack(gt_classes)
-        gt_boxes = torch.stack(gt_boxes)
 
         return gt_labels, gt_classes, gt_boxes
