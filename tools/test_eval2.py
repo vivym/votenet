@@ -239,7 +239,7 @@ def eval_det_cls_wrapper(arguments):
 from multiprocessing import Pool
 
 
-def eval_det_multiprocessing(pred_all, gt_all, ovthresh=0.25, use_07_metric=False):
+def eval_det_multiprocessing(pred, gt, ovthresh=0.25, use_07_metric=False):
     """ Generic functions to compute precision/recall for object detection
         for multiple classes.
         Input:
@@ -252,23 +252,6 @@ def eval_det_multiprocessing(pred_all, gt_all, ovthresh=0.25, use_07_metric=Fals
             prec: {classname: prec_all}
             ap: {classname: scalar}
     """
-    pred = {}  # map {classname: pred}
-    gt = {}  # map {classname: gt}
-    for img_id in pred_all.keys():
-        for classname, bbox, score in pred_all[img_id]:
-            if classname not in pred: pred[classname] = {}
-            if img_id not in pred[classname]:
-                pred[classname][img_id] = []
-            if classname not in gt: gt[classname] = {}
-            if img_id not in gt[classname]:
-                gt[classname][img_id] = []
-            pred[classname][img_id].append((bbox, score))
-    for img_id in gt_all.keys():
-        for classname, bbox in gt_all[img_id]:
-            if classname not in gt: gt[classname] = {}
-            if img_id not in gt[classname]:
-                gt[classname][img_id] = []
-            gt[classname][img_id].append(bbox)
 
     rec = {}
     prec = {}
@@ -290,12 +273,80 @@ def eval_det_multiprocessing(pred_all, gt_all, ovthresh=0.25, use_07_metric=Fals
     return rec, prec, ap
 
 
-def main():
-    old_pred = torch.load("old_predictions.pth")
-    pred_all = old_pred["pred_map_cls"]
-    gt_all = old_pred["gt_map_cls"]
+def roty(t):
+    """Rotation about the y-axis."""
+    c = np.cos(t)
+    s = np.sin(t)
+    return np.array([[c,  0,  s],
+                    [0,  1,  0],
+                    [-s, 0,  c]])
 
-    rec, prec, ap = eval_det_multiprocessing(pred_all, gt_all)
+
+def get_3d_box(box_size, heading_angle, center):
+    ''' box_size is array(l,w,h), heading_angle is radius clockwise from pos x axis, center is xyz of box center
+        output (8,3) array for 3D box cornders
+        Similar to utils/compute_orientation_3d
+    '''
+    R = roty(heading_angle)
+    l,w,h = box_size
+    x_corners = [l/2,l/2,-l/2,-l/2,l/2,l/2,-l/2,-l/2]
+    y_corners = [h/2,h/2,h/2,h/2,-h/2,-h/2,-h/2,-h/2]
+    z_corners = [w/2,-w/2,-w/2,w/2,w/2,-w/2,-w/2,w/2]
+    corners_3d = np.dot(R, np.vstack([x_corners,y_corners,z_corners]))
+    corners_3d[0,:] = corners_3d[0,:] + center[0]
+    corners_3d[1,:] = corners_3d[1,:] + center[1]
+    corners_3d[2,:] = corners_3d[2,:] + center[2]
+    corners_3d = np.transpose(corners_3d)
+    return corners_3d
+
+
+def flip_axis_to_camera(pc):
+    ''' Flip X-right,Y-forward,Z-up to X-right,Y-down,Z-forward
+    Input and output are both (N,3) array
+    '''
+    pc2 = np.copy(pc)
+    pc2[...,[0,1,2]] = pc2[...,[0,2,1]] # cam X,Y,Z = depth X,-Z,Y
+    pc2[...,1] *= -1
+    return pc2
+
+def flip_axis_to_depth(pc):
+    pc2 = np.copy(pc)
+    pc2[...,[0,1,2]] = pc2[...,[0,2,1]] # depth X,Y,Z = cam X,Z,-Y
+    pc2[...,2] *= -1
+    return pc2
+
+
+def main():
+    old_pred = torch.load("old_predictions.pth", map_location="cpu")
+    pred_map_cls = old_pred["pred_map_cls"]
+    gt_map_cls = old_pred["gt_map_cls"]
+
+    all_pred = defaultdict(lambda: defaultdict(list))
+    all_gt_boxes = defaultdict(lambda: defaultdict(list))
+    for img_id in pred_map_cls.keys():
+        pred = pred_map_cls[img_id]
+        gt = gt_map_cls[img_id]
+        scores = pred["scores"].max(dim=-1)[0]
+        pred_classes = pred["pred_classes"].tolist()
+        pred_boxes = pred["pred_boxes"].tolist()
+        gt_classes = gt["gt_classes"].tolist()
+        gt_boxes = gt["gt_boxes"].tolist()
+
+        for cls, box, score in zip(pred_classes, pred_boxes, scores):
+            box_size = box[3:6]
+            center_upright_camera = (box[0], -box[2], box[1])
+            corners_3d_upright_camera = get_3d_box(box_size, 0, center_upright_camera)
+            box = flip_axis_to_depth(corners_3d_upright_camera)
+            all_pred[cls][img_id].append((box, score))
+
+        for cls, box in zip(gt_classes, gt_boxes):
+            box_size = box[3:6]
+            center_upright_camera = (box[0], -box[2], box[1])
+            corners_3d_upright_camera = get_3d_box(box_size, 0, center_upright_camera)
+            box = flip_axis_to_depth(corners_3d_upright_camera)
+            all_gt_boxes[cls][img_id].append(box)
+
+    rec, prec, ap = eval_det_multiprocessing(all_pred, all_gt_boxes)
 
     ret_dict = {}
     ret_dict['mAP'] = np.mean(list(ap.values()))

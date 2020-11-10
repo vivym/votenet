@@ -44,13 +44,11 @@ class BoxMode(IntEnum):
         is_numpy = isinstance(box, np.ndarray)
         single_box = isinstance(box, (list, tuple))
         if single_box:
-            arr = torch.tensor(box)[None, :]
+            box = torch.tensor(box)[None, :]
         else:
             # avoid modifying the input box
             if is_numpy:
-                arr = torch.from_numpy(np.asarray(box)).clone()
-            else:
-                arr = box.clone()
+                box = torch.from_numpy(np.asarray(box))
 
         box_dim = box.size(-1)
         if from_mode == BoxMode.XYZWDH_ABS or from_mode == BoxMode.XYZXYZ_ABS:
@@ -65,58 +63,63 @@ class BoxMode(IntEnum):
             )
 
         if from_mode == BoxMode.XYZWDH_ABS:
+            has_angles = box.size(-1) == 7
             if to_mode == BoxMode.XYZXYZ_ABS:
-                half_sizes = arr[:, 3:6] / 2.
-                centers = arr[:, 0:3]
+                half_sizes = box[:, 3:6] / 2.
+                centers = box[:, 0:3]
+
+                arr = torch.zeros_like(box, dtype=box.dtype, device=box.device)
                 arr[:, 0:3] = centers - half_sizes
                 arr[:, 3:6] = centers + half_sizes
+                if has_angles:
+                    arr[:, 6] = box[:, 6]
             else:  # BoxMode.XYZLBDRFU_ABS
                 # TODO: consider rotations
                 assert "origins" in kwargs
                 origins = kwargs["origins"]
-                has_angles = arr.size(-1) == 7
-                half_sizes = arr[:, 3:6] / 2.
-                p1 = arr[:, 0:3] - half_sizes
-                p2 = arr[:, 0:3] + half_sizes
-                angles = arr[:, 6] if has_angles else None
-                arr = torch.zeros(arr.size(0), 10 if has_angles else 9, dtype=arr.dtype, device=arr.device)
-                if has_angles:
-                    arr[:, 9] = angles
+                half_sizes = box[:, 3:6] / 2.
+                p1 = box[:, 0:3] - half_sizes
+                p2 = box[:, 0:3] + half_sizes
+
+                arr = torch.zeros(box.size(0), 10 if has_angles else 9, dtype=box.dtype, device=box.device)
                 arr[:, 0:3] = origins
                 arr[:, 3:6] = origins - p1
                 arr[:, 6:9] = p2 - origins
+                if has_angles:
+                    arr[:, 9] = box[:, 6]
         elif from_mode == BoxMode.XYZXYZ_ABS:
+            has_angles = box.size(-1) == 7
             if to_mode == BoxMode.XYZWDH_ABS:
-                sizes = arr[:, 3:6] - arr[:, 0:3]
-                arr[:, 0:3] += sizes / 2.
+                sizes = box[:, 3:6] - box[:, 0:3]
+
+                arr = torch.zeros_like(box, dtype=box.dtype, device=box.device)
+                arr[:, 0:3] = box[:, 0:3] + sizes / 2.
                 arr[:, 3:6] = sizes
+                if has_angles:
+                    arr[:, 6] = box[:, 6]
             else:  # BoxMode.XYZLBDRFU_ABS
                 # TODO: consider rotations
                 assert "origins" in kwargs
                 origins = kwargs["origins"]
-                has_angles = arr.size(-1) == 7
-                p1 = arr[:, 0:3]
-                p2 = arr[:, 3:6]
-                angles = arr[:, 6] if has_angles else None
-                arr = torch.zeros(arr.size(0), 10 if has_angles else 9, dtype=arr.dtype, device=arr.device)
-                if has_angles:
-                    arr[:, 9] = angles
+                p1 = box[:, 0:3]
+                p2 = box[:, 3:6]
+
+                arr = torch.zeros(box.size(0), 10 if has_angles else 9, dtype=box.dtype, device=box.device)
                 arr[:, 0:3] = origins
                 arr[:, 3:6] = origins - p1
                 arr[:, 6:9] = p2 - origins
+                if has_angles:
+                    arr[:, 9] = box[:, 6]
         else:  # BoxMode.XYZLBDRFU_ABS
+            has_angles = box.size(-1) == 10
             # TODO: consider rotations
-            has_angles = arr.size(-1) == 10
-            origins = arr[:, 0:3]
-            lbd = arr[:, 3:6]
-            rfu = arr[:, 6:9]
-            angles = arr[:, 9] if has_angles else None
-            arr = torch.zeros(arr.size(0), 7 if has_angles else 6, dtype=arr.dtype, device=arr.device)
-            if has_angles:
-                arr[:, 6] = angles
+            origins = box[:, 0:3]
+            lbd = box[:, 3:6]
+            rfu = box[:, 6:9]
             p1 = origins - lbd
             p2 = origins + rfu
 
+            arr = torch.zeros(box.size(0), 7 if has_angles else 6, dtype=box.dtype, device=box.device)
             if to_mode == BoxMode.XYZWDH_ABS:
                 sizes = p2 - p1
                 arr[:, 0:3] = p1 + sizes / 2.
@@ -124,6 +127,8 @@ class BoxMode(IntEnum):
             else:  # BoxMode.XYZXYZ_ABS
                 arr[:, 0:3] = p1
                 arr[:, 3:6] = p2
+            if has_angles:
+                arr[:, 6] = box[:, 9]
 
         if single_box:
             return original_type(arr.flatten().tolist())
@@ -373,7 +378,6 @@ def pairwise_intersection(boxes1: "Boxes", boxes2: "Boxes") -> torch.Tensor:
     width_depth_height = torch.min(boxes1[:, None, 3:6], boxes2[:, 3:6]) - torch.max(
         boxes1[:, None, 0:3], boxes2[:, 0:3]
     )  # [N, M, 3]
-
     width_depth_height.clamp_(min=0)  # [N, M, 3]
     intersection = width_depth_height.prod(dim=-1)  # [N, M]
     return intersection

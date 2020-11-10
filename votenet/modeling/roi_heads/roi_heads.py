@@ -111,29 +111,25 @@ class StandardROIHeads(nn.Module):
             pred_heading_deltas: Optional[torch.Tensor],
             proposals: List[Instances],
     ):
-        batch_size = pred_cls_logits.size(0)
-        num_proposals = pred_cls_logits.size(-1)
-
         pred_scores, pred_classes = pred_cls_logits.detach().sigmoid().max(dim=1)
 
-        pred_boxes = torch.stack([x.pred_boxes.get_tensor() for x in proposals])
-        pred_box_deltas = torch.gather(
-            pred_box_deltas.detach(), dim=2, index=pred_classes.view(batch_size, num_proposals, 1, 1).repeat(1, 1, 1, 6)
-        ).view(batch_size, num_proposals, 6)
-        pred_boxes[..., 3:9] += pred_box_deltas
-
-        if pred_heading_deltas is not None:
-            pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
-            pred_heading_deltas = torch.gather(
-                pred_heading_deltas.detach(), dim=2, index=pred_classes.view(batch_size, num_proposals, 1)
-            ).view(batch_size, num_proposals)
-            pred_heading_angles += pred_heading_deltas
-            pred_boxes = torch.cat([pred_boxes, pred_heading_angles], dim=-1)
-
         instances = []
-        for pred_scores_i, pred_classes_i, pred_boxes_i in zip(
-                pred_scores, pred_classes, pred_boxes
-        ):
+        for i, (pred_scores_i, pred_classes_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
+                pred_scores, pred_classes, pred_box_deltas.detach(), proposals
+        )):
+            fg_mask = (pred_classes_i >= 0) & (pred_classes_i < self.num_classes)
+            fg_pred_classes = pred_classes_i[fg_mask]
+            # TODO: add angles to boxes
+            pred_boxes_i = proposals_i.proposal_boxes.get_tensor()[fg_mask]
+            pred_box_deltas_i = pred_box_deltas_i[fg_mask, fg_pred_classes]
+            pred_boxes_i[..., 3:9] += pred_box_deltas_i
+
+            if pred_heading_deltas is not None:
+                pred_heading_angles_i = proposals_i.pred_heading_angles
+                pred_heading_deltas_i = pred_heading_deltas[i].detach()[fg_mask, fg_pred_classes]
+                pred_heading_angles_i += pred_heading_deltas_i
+                pred_boxes_i = torch.cat([pred_boxes_i, pred_heading_angles_i], dim=-1)
+
             pred_boxes_i = Boxes.from_tensor(
                 pred_boxes_i, mode=BoxMode.XYZLBDRFU_ABS
             ).convert(BoxMode.XYZWDH_ABS)
@@ -142,10 +138,9 @@ class StandardROIHeads(nn.Module):
             # keep = batch_nms_3d(pred_boxes_i, pred_scores_i)
 
             instances_i = Instances()
-            instances_i.pred_classes = pred_classes_i
+            instances_i.pred_classes = pred_classes_i[fg_mask]
             instances_i.pred_boxes = pred_boxes_i
-            instances_i.scores = pred_scores_i
-
+            instances_i.scores = pred_scores_i[fg_mask]
             instances.append(instances_i)
 
         return instances
@@ -163,8 +158,8 @@ class StandardROIHeads(nn.Module):
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
         gt_boxes = torch.stack([x.gt_boxes.get_tensor()[:, 3:9] for x in proposals])
-        pred_boxes = torch.stack([x.pred_boxes.get_tensor()[:, 3:9] for x in proposals])
-        gt_box_deltas = gt_boxes - pred_boxes
+        proposal_boxes = torch.stack([x.proposal_boxes.get_tensor()[:, 3:9] for x in proposals])
+        gt_box_deltas = gt_boxes - proposal_boxes
 
         losses = {}
         losses["loss_cls"] = F.cross_entropy(

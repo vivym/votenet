@@ -78,22 +78,31 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
         ovmax = -np.inf
         jmax = -1
 
+        def convert(corners) -> torch.Tensor:
+            # print(corners, "right")
+            corners = corners.clone()
+            corners[..., (0, 1, 2)] = corners[..., (0, 2, 1)]
+            corners[..., 2] *= -1
+            # print(corners, "left")
+
+            widths = corners[:, 1, 0] - corners[:, 2, 0]
+            depths = corners[:, 3, 1] - corners[:, 2, 1]
+            heights = corners[:, 6, 2] - corners[:, 2, 2]
+            centers = (corners[:, 2, :] + corners[:, 4, :]) / 2.
+
+            return torch.cat([centers, widths[:, None], depths[:, None], heights[:, None]], dim=-1)
+
         if BBGT.size(0) > 0:
             # compute overlaps
-            """
+            BBGT_ = convert(BBGT)
+            bb_ = convert(torch.as_tensor(bb[None, :])).squeeze(0)
             overlaps = pairwise_iou(
-                Boxes.from_tensor(BBGT, mode=BoxMode.XYZWDH_ABS),
-                Boxes.from_tensor(bb[None, :], mode=BoxMode.XYZWDH_ABS),
+                Boxes.from_tensor(BBGT_, mode=BoxMode.XYZWDH_ABS),
+                Boxes.from_tensor(bb_[None, :], mode=BoxMode.XYZWDH_ABS),
             ).squeeze()
 
             ovmax, jmax = overlaps.max(dim=0)
             ovmax, jmax = ovmax.item(), jmax.item()
-            """
-            for j in range(BBGT.shape[0]):
-                iou = calc_iou(bb, BBGT[j,...].numpy())
-                if iou > ovmax:
-                    ovmax = iou
-                    jmax = j
 
         if ovmax > ovthresh:
             if not R["det"][jmax]:
@@ -105,6 +114,7 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
             fp[d] = 1.0
 
     # compute precision recall
+    print(fp.sum(), tp.sum())
     fp = np.cumsum(fp)
     tp = np.cumsum(tp)
     rec = tp / float(npos)
@@ -116,51 +126,28 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
     return rec, prec, ap
 
 
-def calc_iou(box_a, box_b):
-    """Computes IoU of two axis aligned bboxes.
-    Args:
-        box_a, box_b: 6D of center and lengths
-    Returns:
-        iou
-    """
-
-    max_a = box_a[0:3] + box_a[3:6] / 2
-    max_b = box_b[0:3] + box_b[3:6] / 2
-    min_max = np.array([max_a, max_b]).min(0)
-
-    min_a = box_a[0:3] - box_a[3:6] / 2
-    min_b = box_b[0:3] - box_b[3:6] / 2
-    max_min = np.array([min_a, min_b]).max(0)
-    if not ((min_max > max_min).all()):
-        return 0.0
-
-    intersection = (min_max - max_min).prod()
-    vol_a = box_a[3:6].prod()
-    vol_b = box_b[3:6].prod()
-    union = vol_a + vol_b - intersection
-    return 1.0 * intersection / union
-
-
 def eval_predictions(all_pred, all_gt_boxes):
     aps = defaultdict(list)
     # TODO: get class ids from Metadata
     for cls in all_gt_boxes.keys():
-        for thresh in range(50, 100, 5):
+        for thresh in [25,]:
             rec, prec, ap = voc_eval(
                 all_pred[cls],
                 all_gt_boxes[cls],
                 ovthresh=thresh / 100.0,
                 use_07_metric=False,
             )
+            print(cls, ap)
             aps[thresh].append(ap * 100)
+        break
 
     mAP = {iou: np.mean(x) for iou, x in aps.items()}
-    results = {"AP": np.mean(list(mAP.values())), "AP50": mAP[50], "AP75": mAP[75]}
+    results = {"AP": np.mean(list(mAP.values())), "AP25": mAP[25]}
     print(results)
 
 
 def main():
-    old_pred = torch.load("old_predictions.pth", map_location="cpu")
+    old_pred = torch.load("old_predictions_.pth", map_location="cpu")
     pred_all = old_pred["pred_map_cls"]
     gt_all = old_pred["gt_map_cls"]
 

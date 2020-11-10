@@ -35,16 +35,16 @@ class ROIGridPooler(nn.Module):
 
     def forward(self, seed_xyz: torch.Tensor, seed_features: torch.Tensor, proposals: List[Instances]):
         batch_size = len(proposals)
-        # TODO: support different number of pred_boxes
-        num_proposals = len(proposals[0].pred_boxes)
+        # TODO: support different number of proposal_boxes
+        num_proposals = len(proposals[0].proposal_boxes)
         dtype = seed_xyz.dtype
         device = seed_xyz.device
 
         # TODO: support different modes of boxes
-        assert proposals[0].pred_boxes.mode == BoxMode.XYZLBDRFU_ABS
-        pred_origins = torch.stack([x.pred_boxes.get_tensor()[:, 0:3] for x in proposals])
-        pred_box_reg = torch.stack([x.pred_boxes.get_tensor()[:, 3:9] for x in proposals])
-        if "pred_heading_angles" in proposals[0].pred_boxes:
+        assert proposals[0].proposal_boxes.mode == BoxMode.XYZLBDRFU_ABS
+        pred_origins = torch.stack([x.proposal_boxes.get_tensor()[:, 0:3] for x in proposals])
+        pred_box_reg = torch.stack([x.proposal_boxes.get_tensor()[:, 3:9] for x in proposals])
+        if "pred_heading_angles" in proposals[0].proposal_boxes:
             pred_heading_angles = torch.stack([x.pred_heading_angles for x in proposals])
         else:
             pred_heading_angles = torch.zeros(batch_size, num_proposals, dtype=dtype, device=device)

@@ -80,7 +80,6 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
 
         if BBGT.size(0) > 0:
             # compute overlaps
-            """
             overlaps = pairwise_iou(
                 Boxes.from_tensor(BBGT, mode=BoxMode.XYZWDH_ABS),
                 Boxes.from_tensor(bb[None, :], mode=BoxMode.XYZWDH_ABS),
@@ -88,12 +87,6 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
 
             ovmax, jmax = overlaps.max(dim=0)
             ovmax, jmax = ovmax.item(), jmax.item()
-            """
-            for j in range(BBGT.shape[0]):
-                iou = calc_iou(bb, BBGT[j,...].numpy())
-                if iou > ovmax:
-                    ovmax = iou
-                    jmax = j
 
         if ovmax > ovthresh:
             if not R["det"][jmax]:
@@ -116,31 +109,6 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
     return rec, prec, ap
 
 
-def calc_iou(box_a, box_b):
-    """Computes IoU of two axis aligned bboxes.
-    Args:
-        box_a, box_b: 6D of center and lengths
-    Returns:
-        iou
-    """
-
-    max_a = box_a[0:3] + box_a[3:6] / 2
-    max_b = box_b[0:3] + box_b[3:6] / 2
-    min_max = np.array([max_a, max_b]).min(0)
-
-    min_a = box_a[0:3] - box_a[3:6] / 2
-    min_b = box_b[0:3] - box_b[3:6] / 2
-    max_min = np.array([min_a, min_b]).max(0)
-    if not ((min_max > max_min).all()):
-        return 0.0
-
-    intersection = (min_max - max_min).prod()
-    vol_a = box_a[3:6].prod()
-    vol_b = box_b[3:6].prod()
-    union = vol_a + vol_b - intersection
-    return 1.0 * intersection / union
-
-
 def eval_predictions(all_pred, all_gt_boxes):
     aps = defaultdict(list)
     # TODO: get class ids from Metadata
@@ -161,28 +129,27 @@ def eval_predictions(all_pred, all_gt_boxes):
 
 def main():
     old_pred = torch.load("old_predictions.pth", map_location="cpu")
-    pred_all = old_pred["pred_map_cls"]
-    gt_all = old_pred["gt_map_cls"]
+    pred_map_cls = old_pred["pred_map_cls"]
+    gt_map_cls = old_pred["gt_map_cls"]
 
-    pred = {}  # map {classname: pred}
-    gt = {}  # map {classname: gt}
-    for img_id in pred_all.keys():
-        for classname, bbox, score in pred_all[img_id]:
-            if classname not in pred: pred[classname] = {}
-            if img_id not in pred[classname]:
-                pred[classname][img_id] = []
-            if classname not in gt: gt[classname] = {}
-            if img_id not in gt[classname]:
-                gt[classname][img_id] = []
-            pred[classname][img_id].append((bbox, score))
-    for img_id in gt_all.keys():
-        for classname, bbox in gt_all[img_id]:
-            if classname not in gt: gt[classname] = {}
-            if img_id not in gt[classname]:
-                gt[classname][img_id] = []
-            gt[classname][img_id].append(bbox)
+    all_pred = defaultdict(lambda: defaultdict(list))
+    all_gt_boxes = defaultdict(lambda: defaultdict(list))
+    for img_id in pred_map_cls.keys():
+        pred = pred_map_cls[img_id]
+        gt = gt_map_cls[img_id]
+        scores = pred["scores"].max(dim=-1)[0]
+        pred_classes = pred["pred_classes"].tolist()
+        pred_boxes = pred["pred_boxes"].tolist()
+        gt_classes = gt["gt_classes"].tolist()
+        gt_boxes = gt["gt_boxes"].tolist()
 
-    eval_predictions(pred, gt)
+        for cls, box, score in zip(pred_classes, pred_boxes, scores):
+            all_pred[cls][img_id].append((box, score))
+
+        for cls, box in zip(gt_classes, gt_boxes):
+            all_gt_boxes[cls][img_id].append(box)
+
+    eval_predictions(all_pred, all_gt_boxes)
 
 
 if __name__ == '__main__':

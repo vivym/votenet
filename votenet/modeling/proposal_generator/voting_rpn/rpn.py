@@ -115,7 +115,7 @@ class VotingRPN(nn.Module):
         )):
             instances = Instances()
             instances.pred_objectness = pred_objectness_i
-            instances.pred_boxes = Boxes.from_tensor(
+            instances.proposal_boxes = Boxes.from_tensor(
                 torch.cat([pred_origins_i, pred_box_reg_i], dim=-1),
                 mode=BoxMode.XYZLBDRFU_ABS,
             )
