@@ -198,6 +198,7 @@ class Boxes(object, metaclass=ABCMeta):
         elif mode == BoxMode.XYZLBDRFU_ABS:
             return XYZLBDRFUBoxes(tensor, **kwargs)
         else:
+            print(mode)
             raise NotImplementedError
 
     def convert(self, to_mode: "BoxMode", **kwargs: Any) -> "Boxes":
@@ -207,11 +208,13 @@ class Boxes(object, metaclass=ABCMeta):
         return Boxes.from_tensor(tensor, mode=to_mode, **fields)
 
     def _get_tensor(self, mode: Optional["BoxMode"] = None, **kwargs: Any) -> Tuple[torch.Tensor, Dict]:
+        # TODO:
+        is_empty = len(kwargs) == 0
         for k, v in self._fields.items():
             if k not in kwargs:
                 kwargs[k] = v
         if mode is None or mode == self._mode:
-            assert len(kwargs) == 0, kwargs
+            assert is_empty, kwargs
             return self._tensor, kwargs
         else:
             return BoxMode.convert(
@@ -219,7 +222,7 @@ class Boxes(object, metaclass=ABCMeta):
             )
 
     def get_tensor(self, mode: Optional["BoxMode"] = None, **kwargs: Any):
-        box = self.convert(mode, **kwargs)
+        box = self.convert(self._mode if mode is None else mode, **kwargs)
         return box._tensor
 
     @property

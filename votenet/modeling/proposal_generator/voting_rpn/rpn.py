@@ -88,7 +88,7 @@ class VotingRPN(nn.Module):
             pred_heading_cls_logits: Optional[torch.Tensor] = None,
             pred_heading_deltas: Optional[torch.Tensor] = None,
             gt_classes: Optional[torch.Tensor] = None,
-            gt_boxes: Optional[torch.Tensor] = None,
+            gt_boxes: Optional[List["Boxes"]] = None,
             gt_heading_classes: Optional[torch.Tensor] = None,
             gt_heading_deltas: Optional[torch.Tensor] = None,
     ):
@@ -127,7 +127,7 @@ class VotingRPN(nn.Module):
                 instances.gt_classes = gt_classes[i]
 
             if gt_boxes is not None:
-                instances.gt_boxes = Boxes.from_tensor(gt_boxes[i], mode=BoxMode.XYZLBDRFU_ABS)
+                instances.gt_boxes = gt_boxes[i]
 
             if gt_heading_deltas is not None:
                 instances.gt_heading_deltas = gt_heading_deltas[i]
@@ -137,7 +137,7 @@ class VotingRPN(nn.Module):
         return proposals
 
     @torch.no_grad()
-    def compute_gt_angles(self, gt_boxes: ["Boxes"]):
+    def compute_gt_angles(self, gt_boxes: List["Boxes"]):
         gt_angles = gt_boxes.get("angles") % (2 * np.pi)
         angle_per_bin = 2 * np.pi / 12
         shifted_angles = (gt_angles + angle_per_bin / 2) % (2 * np.pi)
@@ -150,7 +150,7 @@ class VotingRPN(nn.Module):
     def losses(
             self,
             pred_objectness_logits: torch.Tensor, gt_labels: torch.Tensor,
-            pred_box_reg: torch.Tensor, gt_boxes: torch.Tensor,
+            pred_box_reg: torch.Tensor, gt_boxes: List["Boxes"],
             pred_heading_cls_logits: Optional[torch.Tensor],
             gt_heading_classes: Optional[torch.Tensor],
             pred_heading_deltas: Optional[torch.Tensor],
@@ -177,7 +177,7 @@ class VotingRPN(nn.Module):
             reduction="sum",
         ) / normalizer
 
-        gt_box_reg = gt_boxes[..., 3:9]
+        gt_box_reg = torch.stack([x.get_tensor() for x in gt_boxes])
         losses["loss_rpn_loc"] = huber_loss(
             pred_box_reg[pos_mask],
             gt_box_reg[pos_mask],

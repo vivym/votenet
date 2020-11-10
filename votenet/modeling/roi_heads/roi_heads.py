@@ -146,11 +146,10 @@ class StandardROIHeads(nn.Module):
             # 2. Apply NMS for each class independently.
             # TODO: make it configurable
             keep = batched_nms_3d(pred_boxes_i, scores_i, filter_inds[:, 1], 0.25)
-            """
             topk_per_image = 256
             if topk_per_image >= 0:
                 keep = keep[:topk_per_image]
-            """
+
             pred_boxes_i, scores_i, filter_inds = pred_boxes_i[keep], scores_i[keep], filter_inds[keep]
 
             if pred_heading_deltas is not None:

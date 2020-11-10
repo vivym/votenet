@@ -98,7 +98,7 @@ class DatasetMapper:
         gt_boxes = dataset_dict["gt_boxes"]
         gt_classes = dataset_dict["gt_classes"]
 
-        gt_boxes = BoxMode.convert(gt_boxes, from_mode=bbox_mode, to_mode=BoxMode.XYZWDH_ABS)
+        gt_boxes, _ = BoxMode.convert(gt_boxes, from_mode=bbox_mode, to_mode=BoxMode.XYZWDH_ABS)
 
         if self.use_color:
             points = points[:, :6]
