@@ -53,12 +53,14 @@ class StandardROIHeads(nn.Module):
         self,
         *,
         num_classes: int,
+        box_reg_loss_weight: float,
         pooler: nn.Module,
         box_head: nn.Module,
     ):
         super().__init__()
 
         self.num_classes = num_classes
+        self.box_reg_loss_weight = box_reg_loss_weight
         self.pooler = pooler
         self.box_head = box_head
 
@@ -69,6 +71,7 @@ class StandardROIHeads(nn.Module):
 
         return {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+            "box_reg_loss_weight": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT,
             "pooler": ROIGridPooler(grid_size, seed_feature_dim),
             "box_head": build_box_head(cfg),
         }
@@ -123,10 +126,10 @@ class StandardROIHeads(nn.Module):
             # (num_proposals, num_classes, 6)
             pred_boxes_i = proposal_boxes_i[:, None, :] + pred_box_deltas_i
             # (num_proposals, num_classes, 6)
-            pred_origins = proposals_i.proposal_boxes.get("origins").repeat(1, self.num_classes, 1)
+            pred_origins = proposals_i.proposal_boxes.get("origins")[:, None, :].repeat(1, self.num_classes, 1)
 
             pred_boxes_i, _ = BoxMode.convert(
-                pred_boxes_i.view(-1, 6), from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZXYZ_ABS,
+                pred_boxes_i, from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZXYZ_ABS,
                 origins=pred_origins,
             )
             pred_boxes_i = pred_boxes_i.view(-1, self.num_classes, 6)
@@ -204,7 +207,7 @@ class StandardROIHeads(nn.Module):
             gt_box_deltas[fg_inds],
             beta=0.5,
             reduction="sum",
-        ) / normalizer
+        ) / normalizer * self.box_reg_loss_weight
 
         if pred_heading_deltas is not None:
             gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])

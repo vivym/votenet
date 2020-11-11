@@ -25,17 +25,20 @@ class VotingRPN(nn.Module):
             self,
             *,
             num_classes: int,
+            box_reg_loss_weight: float,
             rpn_head: nn.Module,
     ):
         super().__init__()
 
         self.num_classes = num_classes
+        self.box_reg_loss_weight = box_reg_loss_weight
         self.rpn_head = rpn_head
 
     @classmethod
     def from_config(cls, cfg):
         ret = {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+            "box_reg_loss_weight": cfg.MODEL.RPN.BBOX_REG_LOSS_WEIGHT,
             "rpn_head": build_rpn_head(cfg),
         }
 
@@ -183,7 +186,7 @@ class VotingRPN(nn.Module):
             gt_box_reg[pos_mask],
             beta=0.15,
             reduction="sum",
-        ) / normalizer
+        ) / normalizer * self.box_reg_loss_weight
 
         if pred_heading_cls_logits is not None:
             assert pred_heading_deltas is not None

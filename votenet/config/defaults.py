@@ -55,7 +55,7 @@ _C.DATASETS.TEST = ()
 # -----------------------------------------------------------------------------
 _C.DATALOADER = CN()
 # Number of data loading threads
-_C.DATALOADER.NUM_WORKERS = 4
+_C.DATALOADER.NUM_WORKERS = 8
 # Options: TrainingSampler, RepeatFactorTrainingSampler
 _C.DATALOADER.SAMPLER_TRAIN = "TrainingSampler"
 # Repeat threshold for RepeatFactorTrainingSampler
@@ -100,6 +100,7 @@ _C.MODEL.PROPOSAL_GENERATOR.NAME = "VotingRPN"
 _C.MODEL.RPN = CN()
 _C.MODEL.RPN.HEAD_NAME = "StandardRPNHead"  # used by RPN_HEAD_REGISTRY
 _C.MODEL.RPN.CENTERNESS = False
+_C.MODEL.RPN.BBOX_REG_LOSS_WEIGHT = 1.0
 
 
 # ---------------------------------------------------------------------------- #
@@ -120,7 +121,7 @@ _C.MODEL.ROI_HEADS.USE_EXP = True
 # ---------------------------------------------------------------------------- #
 _C.MODEL.ROI_BOX_HEAD = CN()
 _C.MODEL.ROI_BOX_HEAD.NAME = "StandardBoxHead"
-
+_C.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT = 1.0
 
 # ---------------------------------------------------------------------------- #
 # Solver

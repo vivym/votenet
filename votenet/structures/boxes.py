@@ -63,54 +63,54 @@ class BoxMode(IntEnum):
         if from_mode == BoxMode.XYZWDH_ABS:
             has_angles = "angles" in kwargs
             if to_mode == BoxMode.XYZXYZ_ABS:
-                half_sizes = box[:, 3:6] / 2.
-                centers = box[:, 0:3]
+                half_sizes = box[..., 3:6] / 2.
+                centers = box[..., 0:3]
 
-                arr[:, 0:3] = centers - half_sizes
-                arr[:, 3:6] = centers + half_sizes
+                arr[..., 0:3] = centers - half_sizes
+                arr[..., 3:6] = centers + half_sizes
             else:  # BoxMode.XYZLBDRFU_ABS
                 # TODO: consider rotations
                 assert "origins" in kwargs
                 origins = kwargs["origins"]
-                half_sizes = box[:, 3:6] / 2.
-                p1 = box[:, 0:3] - half_sizes
-                p2 = box[:, 0:3] + half_sizes
+                half_sizes = box[..., 3:6] / 2.
+                p1 = box[..., 0:3] - half_sizes
+                p2 = box[..., 0:3] + half_sizes
 
-                arr[:, 0:3] = origins - p1
-                arr[:, 3:6] = p2 - origins
+                arr[..., 0:3] = origins - p1
+                arr[..., 3:6] = p2 - origins
         elif from_mode == BoxMode.XYZXYZ_ABS:
             has_angles = "angles" in kwargs
             if to_mode == BoxMode.XYZWDH_ABS:
-                sizes = box[:, 3:6] - box[:, 0:3]
+                sizes = box[..., 3:6] - box[..., 0:3]
 
-                arr[:, 0:3] = box[:, 0:3] + sizes / 2.
-                arr[:, 3:6] = sizes
+                arr[..., 0:3] = box[..., 0:3] + sizes / 2.
+                arr[..., 3:6] = sizes
             else:  # BoxMode.XYZLBDRFU_ABS
                 # TODO: consider rotations
                 assert "origins" in kwargs
                 origins = kwargs["origins"]
-                p1 = box[:, 0:3]
-                p2 = box[:, 3:6]
+                p1 = box[..., 0:3]
+                p2 = box[..., 3:6]
 
-                arr[:, 0:3] = origins - p1
-                arr[:, 3:6] = p2 - origins
+                arr[..., 0:3] = origins - p1
+                arr[..., 3:6] = p2 - origins
         else:  # BoxMode.XYZLBDRFU_ABS
             has_angles = "angles" in kwargs
             # TODO: consider rotations
             assert "origins" in kwargs
             origins = kwargs["origins"]
-            lbd = box[:, 0:3]
-            rfu = box[:, 3:6]
+            lbd = box[..., 0:3]
+            rfu = box[..., 3:6]
             p1 = origins - lbd
             p2 = origins + rfu
 
             if to_mode == BoxMode.XYZWDH_ABS:
                 sizes = p2 - p1
-                arr[:, 0:3] = p1 + sizes / 2.
-                arr[:, 3:6] = sizes
+                arr[..., 0:3] = p1 + sizes / 2.
+                arr[..., 3:6] = sizes
             else:  # BoxMode.XYZXYZ_ABS
-                arr[:, 0:3] = p1
-                arr[:, 3:6] = p2
+                arr[..., 0:3] = p1
+                arr[..., 3:6] = p2
 
         if single_box:
             return original_type(arr.flatten().tolist()), kwargs
