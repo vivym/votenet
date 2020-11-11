@@ -58,17 +58,62 @@ class GeneralizedVoteNet(nn.Module):
             gt_point_votes = None
             gt_point_votes_mask = None
 
+        """
+        state_dict = torch.load(
+            "../_votenet/logs/scannet/cps/checkpoint_epoch_0.tar",
+            map_location="cpu",
+        )["model_state_dict"]
+        points = torch.load("../_votenet/points.pth", map_location="cpu").cuda()
+
+        backbone_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("backbone_net."):
+                k = k.replace("backbone_net.", "")
+                backbone_state_dict[k] = v.cuda()
+        self.backbone.load_state_dict(backbone_state_dict)
+        """
+
         features = self.backbone(points)
         # TODO: pack up
         seed_xyz = features["fp2"]["xyz"]
         seed_features = features["fp2"]["features"]
         seed_inds = features["fp2"]["inds"].long()
 
+        """
+        vote_generator_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("vgen."):
+                k = k.replace("vgen.", "vote_net.")
+                vote_generator_state_dict[k] = v.cuda()
+            if k.startswith("v_agg."):
+                k = k.replace("v_agg.", "vote_agg_net.")
+                vote_generator_state_dict[k] = v.cuda()
+        self.vote_generator.load_state_dict(vote_generator_state_dict)
+        """
+
         voted_xyz, voted_features, voted_inds, vote_losses = self.vote_generator(
             seed_xyz, seed_features, seed_inds, gt_point_votes, gt_point_votes_mask
         )
 
         if self.proposal_generator is not None:
+            """
+            proposal_generator_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith("box_proposal_0."):
+                    if "seed_aggregation" in k:
+                        continue
+                    if "reduce_dim" in k:
+                        continue
+                    k = k.replace("box_proposal_0.", "rpn_head.")
+                    k = k.replace("conv1", "convs.0")
+                    k = k.replace("bn1", "convs.1")
+                    k = k.replace("conv2", "convs.3")
+                    k = k.replace("bn2", "convs.4")
+                    k = k.replace("conv3", "predictor")
+                    proposal_generator_state_dict[k] = v.cuda()
+            self.proposal_generator.load_state_dict(proposal_generator_state_dict)
+            """
+
             proposals, proposal_losses = self.proposal_generator(
                 voted_xyz, voted_features, gt_instances
             )

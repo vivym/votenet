@@ -113,10 +113,10 @@ class PointCloudEvaluation(DatasetEvaluator):
         for prediction in predictions:
             scan_id = prediction["path"]
             pred_classes = prediction["instances"].pred_classes.tolist()
-            pred_boxes = prediction["instances"].pred_boxes.get_tensor(BoxMode.XYZWDH_ABS).tolist()
+            pred_boxes = prediction["instances"].pred_boxes.get_tensor(assert_mode=BoxMode.XYZWDH_ABS).tolist()
             scores = prediction["instances"].scores.tolist()
             gt_classes = prediction["gt_instances"].gt_classes.tolist()
-            gt_boxes = prediction["gt_instances"].gt_boxes.get_tensor(BoxMode.XYZWDH_ABS).tolist()
+            gt_boxes = prediction["gt_instances"].gt_boxes.get_tensor(assert_mode=BoxMode.XYZWDH_ABS).tolist()
 
             for cls, box, score in zip(pred_classes, pred_boxes, scores):
                 all_pred[cls][scan_id].append((box, score))

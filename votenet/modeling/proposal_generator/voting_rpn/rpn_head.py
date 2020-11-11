@@ -27,8 +27,10 @@ class StandardRPNHead(nn.Module):
         convs = [
             nn.Conv1d(128, 128, kernel_size=1),
             nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
             nn.Conv1d(128, 128, kernel_size=1),
             nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
         ]
         self.convs = nn.Sequential(*convs)
 

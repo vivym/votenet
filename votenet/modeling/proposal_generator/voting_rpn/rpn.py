@@ -180,7 +180,7 @@ class VotingRPN(nn.Module):
             reduction="sum",
         ) / normalizer
 
-        gt_box_reg = torch.stack([x.get_tensor() for x in gt_boxes])
+        gt_box_reg = torch.stack([x.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) for x in gt_boxes])
         losses["loss_rpn_loc"] = huber_loss(
             pred_box_reg[pos_mask],
             gt_box_reg[pos_mask],

@@ -40,7 +40,7 @@ def convert_scannet():
                 x = points[ind, :3]
                 center = 0.5 * (x.min(0) + x.max(0))
                 point_votes[ind, :] = center - x
-                point_votes_mask[ind] = 1.0
+                point_votes_mask[ind] = 1
 
         gt_classes = instance_bboxes[:, 6].astype(np.int64)
         gt_classes[:] = [nyu40id2class[x] for x in gt_classes]

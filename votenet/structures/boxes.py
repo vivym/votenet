@@ -221,7 +221,10 @@ class Boxes(object, metaclass=ABCMeta):
                 self._tensor, from_mode=self._mode, to_mode=mode, **kwargs
             )
 
-    def get_tensor(self, mode: Optional["BoxMode"] = None, **kwargs: Any):
+    def get_tensor(
+            self, mode: Optional["BoxMode"] = None, assert_mode: Optional["BoxMode"] = None, **kwargs: Any
+    ):
+        assert self._mode == assert_mode
         box = self.convert(self._mode if mode is None else mode, **kwargs)
         return box._tensor
 
