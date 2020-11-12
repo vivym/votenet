@@ -107,6 +107,7 @@ class PointCloudEvaluation(DatasetEvaluator):
         Evaluate predictions on the given tasks.
         Fill self._results with the metrics of the tasks.
         """
+        # TODO: comment it
         torch.save(predictions, "predictions.pth")
         all_pred = defaultdict(lambda: defaultdict(list))
         all_gt_boxes = defaultdict(lambda: defaultdict(list))
@@ -215,7 +216,7 @@ def voc_eval(all_pred, gt_boxes, ovthresh=0.5, use_07_metric=False):
         if scan_id not in class_recs:
             class_recs[scan_id] = {"bbox": torch.as_tensor([]), "det": []}
     confidence = np.array(confidence)
-    BB = np.array(BB)
+    BB = np.array(BB).reshape(-1, 6)  # in case that BB is empty.
 
     # sort by confidence
     sorted_ind = np.argsort(-confidence)

@@ -22,6 +22,7 @@ class GeneralizedVoteNet(nn.Module):
             vote_generator: nn.Module,
             proposal_generator: Optional[nn.Module],
             roi_heads: nn.Module,
+            overall_loss_multiplier: float
     ):
         super().__init__()
 
@@ -29,6 +30,7 @@ class GeneralizedVoteNet(nn.Module):
         self.vote_generator = vote_generator
         self.proposal_generator = proposal_generator
         self.roi_heads = roi_heads
+        self.overall_loss_multiplier = overall_loss_multiplier
 
     @classmethod
     def from_config(cls, cfg):
@@ -37,6 +39,7 @@ class GeneralizedVoteNet(nn.Module):
             "vote_generator": build_vote_generator(cfg),
             "proposal_generator": build_proposal_generator(cfg),
             "roi_heads": build_roi_heads(cfg),
+            "overall_loss_multiplier": cfg.MODEL.OVERALL_LOSS_MULTIPLIER,
         }
 
     @property
@@ -83,6 +86,10 @@ class GeneralizedVoteNet(nn.Module):
         losses.update(vote_losses)
         losses.update(proposal_losses)
         losses.update(detector_losses)
+
+        for k, loss in losses.items():
+            losses[k] = loss * self.overall_loss_multiplier
+
         return losses
 
     def inference(self, batched_inputs):

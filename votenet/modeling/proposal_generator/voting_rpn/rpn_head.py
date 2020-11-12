@@ -18,11 +18,12 @@ class StandardRPNHead(nn.Module):
     """
 
     @configurable
-    def __init__(self, *, use_axis_aligned_box: bool, use_centerness: bool):
+    def __init__(self, *, use_axis_aligned_box: bool, use_centerness: bool, use_exp: bool):
         super().__init__()
 
         self.use_axis_aligned_box = use_axis_aligned_box
         self.use_centerness = use_centerness
+        self.use_exp = use_exp
 
         convs = [
             nn.Conv1d(128, 128, kernel_size=1),
@@ -55,6 +56,7 @@ class StandardRPNHead(nn.Module):
         return {
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
             "use_centerness": cfg.MODEL.RPN.CENTERNESS,
+            "use_exp": cfg.MODEL.RPN.USE_EXP,
         }
 
     def forward(self, x: torch.Tensor):
@@ -74,7 +76,9 @@ class StandardRPNHead(nn.Module):
         x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
         pred_objectness_logits = x[:, :, 0]  # (bs, num_proposals)
-        pred_box_reg = F.relu(x[:, :, 1:7])
+        pred_box_reg = x[:, :, 1:7]
+        if self.use_exp:
+            pred_box_reg = pred_box_reg.exp()
         idx = 7
 
         pred_heading_cls_logits, pred_heading_deltas = None, None

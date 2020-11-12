@@ -167,8 +167,8 @@ class VotingRPN(nn.Module):
         num_pos = pos_mask.sum().item()
         num_neg = (gt_labels == 0).sum().item()
         storage = get_event_storage()
-        storage.put_scalar("rpn/num_pos_proposals", num_pos / batch_size)
-        storage.put_scalar("rpn/num_neg_proposals", num_neg / batch_size)
+        storage.put_scalar("rpn/pos_ratio", num_pos / normalizer)
+        storage.put_scalar("rpn/neg_ratio", num_neg / normalizer)
 
         # TODO: make box_reg_loss_type configurable
         losses = {}
@@ -228,7 +228,7 @@ class VotingRPN(nn.Module):
 
             gt_classes_i = gt_classes_i[inds]
             gt_sizes_i = gt_sizes_i[inds, :]
-            threshold = torch.mean(gt_sizes_i, dim=1) / 2 * (2 / 3)
+            threshold = torch.sum(gt_sizes_i, dim=-1) / 6 * (2 / 3)
             threshold = threshold ** 2
             gt_labels_i = torch.zeros(num_proposals, dtype=torch.int64, device=device)
             gt_labels_i[dists < threshold] = 1

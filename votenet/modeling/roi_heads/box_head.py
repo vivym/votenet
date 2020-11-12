@@ -28,12 +28,15 @@ class StandardBoxHead(nn.Module):
     """
 
     @configurable
-    def __init__(self, *, num_classes: int, use_axis_aligned_box: bool, use_centerness: bool):
+    def __init__(
+            self, *, num_classes: int, use_axis_aligned_box: bool, use_centerness: bool, use_exp: bool
+    ):
         super().__init__()
 
         self.num_classes = num_classes
         self.use_axis_aligned_box = use_axis_aligned_box
         self.use_centerness = use_centerness
+        self.use_exp = use_exp
 
         convs = [
             nn.Conv1d(128 + 128, 128, kernel_size=1),
@@ -70,6 +73,7 @@ class StandardBoxHead(nn.Module):
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
             "use_centerness": cfg.MODEL.ROI_HEADS.CENTERNESS,
+            "use_exp": cfg.MODEL.ROI_BOX_HEAD.USE_EXP,
         }
 
     def forward(self, x):
@@ -82,6 +86,8 @@ class StandardBoxHead(nn.Module):
         pred_box_deltas = self.box_predictor(x).permute(0, 2, 1).view(
             batch_size, num_proposals, self.num_classes, 6
         )  # (bs, num_proposals, num_classes, 6)
+        if self.use_exp:
+            pred_box_deltas = pred_box_deltas.exp()
 
         pred_heading_deltas = None
         if not self.use_axis_aligned_box:

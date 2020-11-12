@@ -50,17 +50,19 @@ class StandardROIHeads(nn.Module):
 
     @configurable
     def __init__(
-        self,
-        *,
-        num_classes: int,
-        box_reg_loss_weight: float,
-        pooler: nn.Module,
-        box_head: nn.Module,
+            self,
+            *,
+            num_classes: int,
+            box_reg_loss_weight: float,
+            cls_loss_weight: float,
+            pooler: nn.Module,
+            box_head: nn.Module,
     ):
         super().__init__()
 
         self.num_classes = num_classes
         self.box_reg_loss_weight = box_reg_loss_weight
+        self.cls_loss_weight = cls_loss_weight
         self.pooler = pooler
         self.box_head = box_head
 
@@ -72,6 +74,7 @@ class StandardROIHeads(nn.Module):
         return {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "box_reg_loss_weight": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT,
+            "cls_loss_weight": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT,
             "pooler": ROIGridPooler(grid_size, seed_feature_dim),
             "box_head": build_box_head(cfg),
         }
@@ -196,7 +199,7 @@ class StandardROIHeads(nn.Module):
             pred_cls_logits,
             gt_classes,
             reduction="mean",
-        )
+        ) * self.cls_loss_weight
 
         fg_inds = torch.nonzero(
             (gt_classes >= 0) & (gt_classes < self.num_classes), as_tuple=True
@@ -206,7 +209,7 @@ class StandardROIHeads(nn.Module):
         losses["loss_box_loc"] = huber_loss(
             pred_box_deltas[fg_inds + (fg_gt_classes, )],
             gt_box_deltas[fg_inds],
-            beta=0.5,
+            beta=0.15,
             reduction="sum",
         ) / normalizer * self.box_reg_loss_weight
 

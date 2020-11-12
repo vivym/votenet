@@ -20,6 +20,7 @@ _C.MODEL = CN()
 _C.MODEL.MASK_ON = False
 _C.MODEL.DEVICE = "cuda"
 _C.MODEL.META_ARCHITECTURE = "GeneralizedVoteNet"
+_C.MODEL.OVERALL_LOSS_MULTIPLIER = 1.0
 
 # Path (a file path, or URL like https://..) to a checkpoint file
 # to be loaded to the model. You can find available models in the model zoo.
@@ -101,6 +102,7 @@ _C.MODEL.RPN = CN()
 _C.MODEL.RPN.HEAD_NAME = "StandardRPNHead"  # used by RPN_HEAD_REGISTRY
 _C.MODEL.RPN.CENTERNESS = False
 _C.MODEL.RPN.BBOX_REG_LOSS_WEIGHT = 1.0
+_C.MODEL.RPN.USE_EXP = False
 
 
 # ---------------------------------------------------------------------------- #
@@ -113,7 +115,6 @@ _C.MODEL.ROI_HEADS.NUM_CLASSES = 18
 _C.MODEL.ROI_HEADS.CENTERNESS = False
 _C.MODEL.ROI_HEADS.SEED_FEATURE_DIM = 256
 _C.MODEL.ROI_HEADS.GRID_SIZE = 3
-_C.MODEL.ROI_HEADS.USE_EXP = True
 
 
 # ---------------------------------------------------------------------------- #
@@ -122,6 +123,8 @@ _C.MODEL.ROI_HEADS.USE_EXP = True
 _C.MODEL.ROI_BOX_HEAD = CN()
 _C.MODEL.ROI_BOX_HEAD.NAME = "StandardBoxHead"
 _C.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT = 1.0
+_C.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT = 1.0
+_C.MODEL.ROI_BOX_HEAD.USE_EXP = False
 
 # ---------------------------------------------------------------------------- #
 # Solver
