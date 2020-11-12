@@ -29,7 +29,12 @@ class StandardBoxHead(nn.Module):
 
     @configurable
     def __init__(
-            self, *, num_classes: int, use_axis_aligned_box: bool, use_centerness: bool, use_exp: bool
+            self, *,
+            num_classes: int,
+            use_axis_aligned_box: bool,
+            use_centerness: bool,
+            use_exp: bool,
+            use_objectness: bool,
     ):
         super().__init__()
 
@@ -37,6 +42,7 @@ class StandardBoxHead(nn.Module):
         self.use_axis_aligned_box = use_axis_aligned_box
         self.use_centerness = use_centerness
         self.use_exp = use_exp
+        self.use_objectness = use_objectness
 
         convs = [
             nn.Conv1d(128 + 128, 128, kernel_size=1),
@@ -51,6 +57,9 @@ class StandardBoxHead(nn.Module):
         self.cls_predictor = nn.Conv1d(128, num_classes + 1, kernel_size=1)
         self.box_predictor = nn.Conv1d(128, num_classes * 6, kernel_size=1)
         predictors = [self.cls_predictor, self.box_predictor]
+        if use_objectness:
+            self.objectness_predictor = nn.Conv1d(128, 2, kernel_size=1)
+            predictors.append(self.objectness_predictor)
         if not use_axis_aligned_box:
             self.box_angle_predictor = nn.Conv1d(128, num_classes * 1, kernel_size=1)
             predictors.append(self.box_angle_predictor)
@@ -74,6 +83,7 @@ class StandardBoxHead(nn.Module):
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
             "use_centerness": cfg.MODEL.ROI_HEADS.CENTERNESS,
             "use_exp": cfg.MODEL.ROI_BOX_HEAD.USE_EXP,
+            "use_objectness": cfg.MODEL.ROI_BOX_HEAD.USE_OBJECTNESS,
         }
 
     def forward(self, x):
@@ -89,6 +99,10 @@ class StandardBoxHead(nn.Module):
         if self.use_exp:
             pred_box_deltas = pred_box_deltas.exp()
 
+        pred_objectness_logits = None
+        if self.use_objectness:
+            pred_objectness_logits = self.objectness_predictor(x).permute(0, 2, 1)  # (bs, num_proposals, 2)
+
         pred_heading_deltas = None
         if not self.use_axis_aligned_box:
             # (bs, num_proposals, num_classes)
@@ -99,4 +113,4 @@ class StandardBoxHead(nn.Module):
             # (bs, num_proposals)
             pred_centerness = self.centerness_predictor(x).view(batch_size, num_proposals)
 
-        return pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness
+        return pred_objectness_logits, pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness

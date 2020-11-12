@@ -125,6 +125,7 @@ _C.MODEL.ROI_BOX_HEAD.NAME = "StandardBoxHead"
 _C.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT = 1.0
 _C.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT = 1.0
 _C.MODEL.ROI_BOX_HEAD.USE_EXP = False
+_C.MODEL.ROI_BOX_HEAD.USE_OBJECTNESS = False
 
 # ---------------------------------------------------------------------------- #
 # Solver

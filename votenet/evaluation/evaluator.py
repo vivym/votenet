@@ -151,7 +151,7 @@ def inference_on_dataset(model, data_loader, evaluator) -> OrderedDict:
                 eta = datetime.timedelta(seconds=int(total_seconds_per_img * (total - idx - 1)))
                 log_every_n_seconds(
                     logging.INFO,
-                    "Inference done {}/{}. {:.4f} s / img. ETA={}".format(
+                    "Inference done {}/{}. {:.4f} s / scan. ETA={}".format(
                         idx + 1, total, seconds_per_img, str(eta)
                     ),
                     n=5,

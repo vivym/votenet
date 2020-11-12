@@ -90,11 +90,12 @@ class StandardROIHeads(nn.Module):
         # TODO: more fusion strategy
         features = torch.cat([voted_features, pooled_features], dim=1)
 
-        pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness = self.box_head(features)
+        pred_objectness_logits, pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness = \
+            self.box_head(features)
 
         if self.training:
             losses = self.losses(
-                pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
+                pred_objectness_logits, pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
             )
             return None, losses
         else:
@@ -103,7 +104,7 @@ class StandardROIHeads(nn.Module):
         # TODO: yield proposals when training
         if not self.training or False:
             pred_instances = self.predict_instances(
-                pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
+                pred_objectness_logits, pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
             )
         else:
             pred_instances = None
@@ -112,11 +113,17 @@ class StandardROIHeads(nn.Module):
     @torch.no_grad()
     def predict_instances(
             self,
+            pred_objectness_logits: Optional[torch.Tensor],  # (bs, num_proposals, 2)
             pred_cls_logits: torch.Tensor,  # (bs, num_classes, num_proposals)
             pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes, 6)
             pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
     ):
+        # (bs, 2, num_proposals) -> (bs, num_proposals)
+        if pred_objectness_logits is not None:
+            # objectness = F.softmax(pred_objectness_logits, dim=-2)[:, 1, :]
+            pass
+
         # (bs, num_classes, num_proposals) -> (bs, num_proposals, num_classes)
         scores = F.softmax(pred_cls_logits, dim=-2).permute(0, 2, 1)
 
@@ -178,14 +185,17 @@ class StandardROIHeads(nn.Module):
 
     def losses(
             self,
+            pred_objectness_logits: Optional[torch.Tensor],  # (bs, num_proposals, 2)
             pred_cls_logits: torch.Tensor,  # (bs, num_classes + 1, num_proposals)
-            pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes * 6)
+            pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes, 6)
             pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
     ):
         batch_size = pred_cls_logits.size(0)
         num_proposals = pred_cls_logits.size(-1)
         normalizer = batch_size * num_proposals
+        device = pred_cls_logits.device
+        dtype = pred_cls_logits.dtype
 
         gt_classes = torch.stack([x.gt_classes for x in proposals])
         gt_boxes = torch.stack([x.gt_boxes.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) for x in proposals])
@@ -195,6 +205,16 @@ class StandardROIHeads(nn.Module):
         gt_box_deltas = gt_boxes - proposal_boxes
 
         losses = {}
+        if pred_objectness_logits is not None:
+            gt_labels = torch.stack([x.gt_labels for x in proposals])
+            valid_mask = gt_labels >= 0
+            losses["loss_box_objectness"] = F.cross_entropy(
+                pred_objectness_logits[valid_mask],
+                gt_labels[valid_mask].long(),
+                weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
+                reduction="sum",
+            ) / normalizer
+
         losses["loss_cls"] = F.cross_entropy(
             pred_cls_logits,
             gt_classes,

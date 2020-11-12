@@ -70,6 +70,7 @@ class VotingRPN(nn.Module):
                 pred_heading_deltas, gt_heading_deltas,
             )
         else:
+            gt_labels = None
             gt_classes = None
             gt_boxes = None
             gt_heading_classes = None
@@ -78,7 +79,7 @@ class VotingRPN(nn.Module):
 
         proposals = self.predict_proposals(
             voted_xyz, pred_objectness_logits, pred_box_reg, pred_heading_cls_logits, pred_heading_deltas,
-            gt_classes, gt_boxes, gt_heading_classes, gt_heading_deltas
+            gt_labels, gt_classes, gt_boxes, gt_heading_classes, gt_heading_deltas
         )
         return proposals, losses
 
@@ -90,6 +91,7 @@ class VotingRPN(nn.Module):
             pred_box_reg: torch.Tensor,
             pred_heading_cls_logits: Optional[torch.Tensor] = None,
             pred_heading_deltas: Optional[torch.Tensor] = None,
+            gt_labels: Optional[torch.Tensor] = None,
             gt_classes: Optional[torch.Tensor] = None,
             gt_boxes: Optional[List["Boxes"]] = None,
             gt_heading_classes: Optional[torch.Tensor] = None,
@@ -125,6 +127,9 @@ class VotingRPN(nn.Module):
             )
             if pred_heading_angles is not None:
                 instances.pred_heading_angles = pred_heading_angles[i]
+
+            if gt_labels is not None:
+                instances.gt_labels = gt_labels[i]
 
             if gt_classes is not None:
                 instances.gt_classes = gt_classes[i]
