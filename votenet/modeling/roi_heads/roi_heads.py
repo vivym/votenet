@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
-from votenet.layers import huber_loss, batched_nms_3d
+from votenet.layers import huber_loss, batched_nms_3d, nms_3d
 from votenet.utils.registry import Registry
 from votenet.structures import Instances, Boxes, BoxMode
 
@@ -55,6 +55,8 @@ class StandardROIHeads(nn.Module):
             num_classes: int,
             box_reg_loss_weight: float,
             cls_loss_weight: float,
+            objectness_loss_type: str,
+            cls_agnostic_bbox_reg: bool,
             pooler: nn.Module,
             box_head: nn.Module,
     ):
@@ -63,6 +65,8 @@ class StandardROIHeads(nn.Module):
         self.num_classes = num_classes
         self.box_reg_loss_weight = box_reg_loss_weight
         self.cls_loss_weight = cls_loss_weight
+        self.objectness_loss_type = objectness_loss_type
+        self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
         self.pooler = pooler
         self.box_head = box_head
 
@@ -75,6 +79,8 @@ class StandardROIHeads(nn.Module):
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "box_reg_loss_weight": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT,
             "cls_loss_weight": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT,
+            "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
+            "cls_agnostic_bbox_reg": cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
             "pooler": ROIGridPooler(grid_size, seed_feature_dim),
             "box_head": build_box_head(cfg),
         }
@@ -133,10 +139,16 @@ class StandardROIHeads(nn.Module):
         )):
             # (num_proposals, 6)
             proposal_boxes_i = proposals_i.proposal_boxes.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS)
-            # (num_proposals, num_classes, 6)
-            pred_boxes_i = proposal_boxes_i[:, None, :] + pred_box_deltas_i
-            # (num_proposals, num_classes, 6)
-            pred_origins = proposals_i.proposal_boxes.get("origins")[:, None, :].repeat(1, self.num_classes, 1)
+            if self.cls_agnostic_bbox_reg:
+                # (num_proposals, 6)
+                pred_boxes_i = proposal_boxes_i + pred_box_deltas_i
+                # (num_proposals, num_classes, 6)
+                pred_origins = proposals_i.proposal_boxes.get("origins")
+            else:
+                # (num_proposals, num_classes, 6)
+                pred_boxes_i = proposal_boxes_i[:, None, :] + pred_box_deltas_i
+                # (num_proposals, num_classes, 6)
+                pred_origins = proposals_i.proposal_boxes.get("origins")[:, None, :].repeat(1, self.num_classes, 1)
 
             pred_boxes_i, _ = BoxMode.convert(
                 pred_boxes_i, from_mode=BoxMode.XYZLBDRFU_ABS, to_mode=BoxMode.XYZXYZ_ABS,
@@ -152,15 +164,21 @@ class StandardROIHeads(nn.Module):
             # R' x 2. First column contains indices of the R predictions;
             # Second column contains indices of classes.
             filter_inds = filter_mask.nonzero(as_tuple=False)
-            pred_boxes_i = pred_boxes_i[filter_mask]
+            if self.cls_agnostic_bbox_reg:
+                pred_boxes_i = pred_boxes_i[filter_inds[:, 0]]
+            else:
+                pred_boxes_i = pred_boxes_i[filter_mask]
             scores_i = scores_i[filter_mask]
 
             # 2. Apply NMS for each class independently.
             # TODO: make it configurable
-            keep = batched_nms_3d(pred_boxes_i, scores_i, filter_inds[:, 1], 0.25)
-            topk_per_image = 256
-            if topk_per_image >= 0:
-                keep = keep[:topk_per_image]
+            if self.cls_agnostic_bbox_reg:
+                keep = nms_3d(pred_boxes_i, scores_i, 0.25)
+            else:
+                keep = batched_nms_3d(pred_boxes_i, scores_i, filter_inds[:, 1], 0.25)
+                topk_per_image = 256
+                if topk_per_image >= 0:
+                    keep = keep[:topk_per_image]
 
             pred_boxes_i, scores_i, filter_inds = pred_boxes_i[keep], scores_i[keep], filter_inds[keep]
 
@@ -208,12 +226,19 @@ class StandardROIHeads(nn.Module):
         if pred_objectness_logits is not None:
             gt_labels = torch.stack([x.gt_labels for x in proposals])
             valid_mask = gt_labels >= 0
-            losses["loss_box_objectness"] = F.cross_entropy(
-                pred_objectness_logits[valid_mask],
-                gt_labels[valid_mask].long(),
-                weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
-                reduction="sum",
-            ) / normalizer
+            if self.objectness_loss_type == "cross_entropy":
+                losses["loss_box_objectness"] = F.cross_entropy(
+                    pred_objectness_logits[valid_mask],
+                    gt_labels[valid_mask].long(),
+                    weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
+                    reduction="sum",
+                ) / normalizer
+            else:  # binary_cross_entropy_with_logits
+                losses["loss_box_objectness"] = F.binary_cross_entropy_with_logits(
+                    pred_objectness_logits.squeeze(-1)[valid_mask],
+                    gt_labels[valid_mask].float(),
+                    reduction="sum",
+                ) / normalizer
 
         losses["loss_cls"] = F.cross_entropy(
             pred_cls_logits,
@@ -221,17 +246,27 @@ class StandardROIHeads(nn.Module):
             reduction="mean",
         ) * self.cls_loss_weight
 
+
         fg_inds = torch.nonzero(
             (gt_classes >= 0) & (gt_classes < self.num_classes), as_tuple=True
         )
-        fg_gt_classes = gt_classes[fg_inds]   # (num_fg,)
-        # TODO: configurable
-        losses["loss_box_loc"] = huber_loss(
-            pred_box_deltas[fg_inds + (fg_gt_classes, )],
-            gt_box_deltas[fg_inds],
-            beta=0.15,
-            reduction="sum",
-        ) / normalizer * self.box_reg_loss_weight
+        if self.cls_agnostic_bbox_reg:
+            # TODO: configurable
+            losses["loss_box_loc"] = huber_loss(
+                pred_box_deltas[fg_inds],
+                gt_box_deltas[fg_inds],
+                beta=0.15,
+                reduction="sum",
+            ) / normalizer * self.box_reg_loss_weight
+        else:
+            fg_gt_classes = gt_classes[fg_inds]   # (num_fg,)
+            # TODO: configurable
+            losses["loss_box_loc"] = huber_loss(
+                pred_box_deltas[fg_inds + (fg_gt_classes, )],
+                gt_box_deltas[fg_inds],
+                beta=0.15,
+                reduction="sum",
+            ) / normalizer * self.box_reg_loss_weight
 
         if pred_heading_deltas is not None:
             gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])

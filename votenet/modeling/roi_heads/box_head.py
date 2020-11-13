@@ -35,6 +35,8 @@ class StandardBoxHead(nn.Module):
             use_centerness: bool,
             use_exp: bool,
             use_objectness: bool,
+            objectness_loss_type: str,
+            cls_agnostic_bbox_reg: bool,
     ):
         super().__init__()
 
@@ -43,6 +45,7 @@ class StandardBoxHead(nn.Module):
         self.use_centerness = use_centerness
         self.use_exp = use_exp
         self.use_objectness = use_objectness
+        self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
 
         convs = [
             nn.Conv1d(128 + 128, 128, kernel_size=1),
@@ -55,10 +58,15 @@ class StandardBoxHead(nn.Module):
         self.convs = nn.Sequential(*convs)
 
         self.cls_predictor = nn.Conv1d(128, num_classes + 1, kernel_size=1)
-        self.box_predictor = nn.Conv1d(128, num_classes * 6, kernel_size=1)
+        if cls_agnostic_bbox_reg:
+            self.box_predictor = nn.Conv1d(128, 6, kernel_size=1)
+        else:
+            self.box_predictor = nn.Conv1d(128, num_classes * 6, kernel_size=1)
         predictors = [self.cls_predictor, self.box_predictor]
         if use_objectness:
-            self.objectness_predictor = nn.Conv1d(128, 2, kernel_size=1)
+            self.objectness_predictor = nn.Conv1d(
+                128, 2 if objectness_loss_type == "cross_entropy" else 1, kernel_size=1
+            )
             predictors.append(self.objectness_predictor)
         if not use_axis_aligned_box:
             self.box_angle_predictor = nn.Conv1d(128, num_classes * 1, kernel_size=1)
@@ -84,6 +92,8 @@ class StandardBoxHead(nn.Module):
             "use_centerness": cfg.MODEL.ROI_HEADS.CENTERNESS,
             "use_exp": cfg.MODEL.ROI_BOX_HEAD.USE_EXP,
             "use_objectness": cfg.MODEL.ROI_BOX_HEAD.USE_OBJECTNESS,
+            "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
+            "cls_agnostic_bbox_reg": cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
         }
 
     def forward(self, x):
@@ -93,9 +103,11 @@ class StandardBoxHead(nn.Module):
         x = self.convs(x)
 
         pred_cls_logits = self.cls_predictor(x)
-        pred_box_deltas = self.box_predictor(x).permute(0, 2, 1).view(
-            batch_size, num_proposals, self.num_classes, 6
-        )  # (bs, num_proposals, num_classes, 6)
+        pred_box_deltas = self.box_predictor(x).permute(0, 2, 1)
+        if not self.cls_agnostic_bbox_reg:
+            pred_box_deltas = pred_box_deltas.view(
+                batch_size, num_proposals, self.num_classes, 6
+            )  # (bs, num_proposals, num_classes, 6)
         if self.use_exp:
             pred_box_deltas = pred_box_deltas.exp()
 

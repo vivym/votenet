@@ -26,12 +26,14 @@ class VotingRPN(nn.Module):
             *,
             num_classes: int,
             box_reg_loss_weight: float,
+            objectness_loss_type: str,
             rpn_head: nn.Module,
     ):
         super().__init__()
 
         self.num_classes = num_classes
         self.box_reg_loss_weight = box_reg_loss_weight
+        self.objectness_loss_type = objectness_loss_type
         self.rpn_head = rpn_head
 
     @classmethod
@@ -39,6 +41,7 @@ class VotingRPN(nn.Module):
         ret = {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "box_reg_loss_weight": cfg.MODEL.RPN.BBOX_REG_LOSS_WEIGHT,
+            "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
             "rpn_head": build_rpn_head(cfg),
         }
 
@@ -97,6 +100,7 @@ class VotingRPN(nn.Module):
             gt_heading_classes: Optional[torch.Tensor] = None,
             gt_heading_deltas: Optional[torch.Tensor] = None,
     ):
+        # TODO: cross_entropy
         pred_objectness = pred_objectness_logits.detach().sigmoid()
 
         if pred_heading_cls_logits is not None:
@@ -164,9 +168,11 @@ class VotingRPN(nn.Module):
             pred_heading_deltas: Optional[torch.Tensor],
             gt_heading_deltas: Optional[torch.Tensor],
     ):
-        batch_size = pred_objectness_logits.size(0)
-        num_proposals = pred_objectness_logits.size(-1)
+        batch_size = pred_box_reg.size(0)
+        num_proposals = pred_box_reg.size(1)
         normalizer = batch_size * num_proposals
+        device = pred_box_reg.device
+        dtype = pred_box_reg.dtype
 
         pos_mask = gt_labels == 1
         num_pos = pos_mask.sum().item()
@@ -179,11 +185,19 @@ class VotingRPN(nn.Module):
         losses = {}
 
         valid_mask = gt_labels >= 0
-        losses["loss_objectness"] = F.binary_cross_entropy_with_logits(
-            pred_objectness_logits[valid_mask],
-            gt_labels[valid_mask].float(),
-            reduction="sum",
-        ) / normalizer
+        if self.objectness_loss_type == "binary_cross_entropy_with_logits":
+            losses["loss_objectness"] = F.binary_cross_entropy_with_logits(
+                pred_objectness_logits[valid_mask],
+                gt_labels[valid_mask].float(),
+                reduction="sum",
+            ) / normalizer
+        else:  # cross_entropy
+            losses["loss_objectness"] = F.cross_entropy(
+                pred_objectness_logits[valid_mask],
+                gt_labels[valid_mask].long(),
+                weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
+                reduction="sum",
+            ) / normalizer
 
         gt_box_reg = torch.stack([x.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) for x in gt_boxes])
         losses["loss_rpn_loc"] = huber_loss(

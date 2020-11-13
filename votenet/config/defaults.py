@@ -103,6 +103,7 @@ _C.MODEL.RPN.HEAD_NAME = "StandardRPNHead"  # used by RPN_HEAD_REGISTRY
 _C.MODEL.RPN.CENTERNESS = False
 _C.MODEL.RPN.BBOX_REG_LOSS_WEIGHT = 1.0
 _C.MODEL.RPN.USE_EXP = False
+_C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = "binary_cross_entropy_with_logits"
 
 
 # ---------------------------------------------------------------------------- #
@@ -126,6 +127,8 @@ _C.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT = 1.0
 _C.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT = 1.0
 _C.MODEL.ROI_BOX_HEAD.USE_EXP = False
 _C.MODEL.ROI_BOX_HEAD.USE_OBJECTNESS = False
+_C.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE = "cross_entropy"
+_C.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG = False
 
 # ---------------------------------------------------------------------------- #
 # Solver

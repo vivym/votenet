@@ -18,12 +18,19 @@ class StandardRPNHead(nn.Module):
     """
 
     @configurable
-    def __init__(self, *, use_axis_aligned_box: bool, use_centerness: bool, use_exp: bool):
+    def __init__(
+            self, *,
+            use_axis_aligned_box: bool,
+            use_centerness: bool,
+            use_exp: bool,
+            objectness_loss_type: str,
+    ):
         super().__init__()
 
         self.use_axis_aligned_box = use_axis_aligned_box
         self.use_centerness = use_centerness
         self.use_exp = use_exp
+        self.objectness_loss_type = objectness_loss_type
 
         convs = [
             nn.Conv1d(128, 128, kernel_size=1),
@@ -35,7 +42,8 @@ class StandardRPNHead(nn.Module):
         ]
         self.convs = nn.Sequential(*convs)
 
-        out_channels = 1 + 6  # objectness(1) + box_reg(6)
+        # objectness(1) + box_reg(6)
+        out_channels = 1 if objectness_loss_type == "binary_cross_entropy_with_logits" else 2 + 6
         if not use_axis_aligned_box:
             out_channels += 12 * 2
         if use_centerness:
@@ -57,6 +65,7 @@ class StandardRPNHead(nn.Module):
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
             "use_centerness": cfg.MODEL.RPN.CENTERNESS,
             "use_exp": cfg.MODEL.RPN.USE_EXP,
+            "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
         }
 
     def forward(self, x: torch.Tensor):
@@ -75,11 +84,16 @@ class StandardRPNHead(nn.Module):
         x = self.convs(x)
         x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
-        pred_objectness_logits = x[:, :, 0]  # (bs, num_proposals)
-        pred_box_reg = x[:, :, 1:7]
+        if self.objectness_loss_type == "binary_cross_entropy_with_logits":
+            pred_objectness_logits = x[:, :, 0]  # (bs, num_proposals)
+            idx = 1
+        else:
+            pred_objectness_logits = x[:, :, 0:2]
+            idx = 2
+        pred_box_reg = x[:, :, idx:idx + 6]
+        idx += 6
         if self.use_exp:
             pred_box_reg = pred_box_reg.exp()
-        idx = 7
 
         pred_heading_cls_logits, pred_heading_deltas = None, None
         if not self.use_axis_aligned_box:
