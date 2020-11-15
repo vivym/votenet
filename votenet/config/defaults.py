@@ -104,6 +104,8 @@ _C.MODEL.RPN.CENTERNESS = False
 _C.MODEL.RPN.BBOX_REG_LOSS_WEIGHT = 1.0
 _C.MODEL.RPN.USE_EXP = False
 _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = "binary_cross_entropy_with_logits"
+_C.MODEL.RPN.THRESHOLD = 0.3
+_C.MODEL.RPN.THRESHOLD2 = 0.45
 
 
 # ---------------------------------------------------------------------------- #
@@ -113,7 +115,6 @@ _C.MODEL.ROI_HEADS = CN()
 _C.MODEL.ROI_HEADS.NAME = "StandardROIHeads"
 # Number of foreground classes
 _C.MODEL.ROI_HEADS.NUM_CLASSES = 18
-_C.MODEL.ROI_HEADS.CENTERNESS = False
 _C.MODEL.ROI_HEADS.SEED_FEATURE_DIM = 256
 _C.MODEL.ROI_HEADS.GRID_SIZE = 3
 
@@ -123,8 +124,10 @@ _C.MODEL.ROI_HEADS.GRID_SIZE = 3
 # ---------------------------------------------------------------------------- #
 _C.MODEL.ROI_BOX_HEAD = CN()
 _C.MODEL.ROI_BOX_HEAD.NAME = "StandardBoxHead"
+_C.MODEL.ROI_BOX_HEAD.CENTERNESS = False
 _C.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT = 1.0
 _C.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT = 1.0
+_C.MODEL.ROI_BOX_HEAD.CLS_LOSS_TYPE = "cross_entropy"
 _C.MODEL.ROI_BOX_HEAD.USE_EXP = False
 _C.MODEL.ROI_BOX_HEAD.USE_OBJECTNESS = False
 _C.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE = "cross_entropy"

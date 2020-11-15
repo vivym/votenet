@@ -49,9 +49,7 @@ class StandardVoteGenerator(nn.Module):
         if self.training:
             assert gt_votes is not None and gt_votes_mask, \
                 "RPN requires gt_votes and gt_votes_mask in training!"
-            losses = {
-                "loss_vote": self.loss_vote(voted_xyz, seed_xyz, seed_inds, gt_votes, gt_votes_mask),
-            }
+            losses = self.losses(voted_xyz, seed_xyz, seed_inds, gt_votes, gt_votes_mask)
         else:
             losses = {}
 
@@ -60,7 +58,7 @@ class StandardVoteGenerator(nn.Module):
         return voted_xyz, voted_features, voted_inds, losses
 
     @torch.jit.unused
-    def loss_vote(
+    def losses(
             self,
             voted_xyz: torch.Tensor, seed_xyz: torch.Tensor, seed_inds: torch.Tensor,
             gt_votes: List[torch.Tensor], gt_votes_mask: List[torch.Tensor],
@@ -81,5 +79,10 @@ class StandardVoteGenerator(nn.Module):
 
         _, _, dist, _ = nn_distance(voted_xyz, gt_votes, dist="l1")
         # (bs * num_seeds, vote_factor) -> (bs, num_seeds)
-        vote_dist, _ = torch.min(dist, dim=1)
-        return torch.mean(vote_dist.view(batch_size, num_seeds)[gt_votes_mask])
+        vote_dist, _ = torch.min(dist, dim=-1)
+
+        losses = {
+            "loss_vote": torch.mean(vote_dist.view(batch_size, num_seeds)[gt_votes_mask]),
+        }
+
+        return losses

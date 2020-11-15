@@ -89,7 +89,7 @@ class StandardBoxHead(nn.Module):
         return {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
-            "use_centerness": cfg.MODEL.ROI_HEADS.CENTERNESS,
+            "use_centerness": cfg.MODEL.ROI_BOX_HEAD.CENTERNESS,
             "use_exp": cfg.MODEL.ROI_BOX_HEAD.USE_EXP,
             "use_objectness": cfg.MODEL.ROI_BOX_HEAD.USE_OBJECTNESS,
             "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
@@ -102,7 +102,7 @@ class StandardBoxHead(nn.Module):
 
         x = self.convs(x)
 
-        pred_cls_logits = self.cls_predictor(x)
+        pred_cls_logits = self.cls_predictor(x).permute(0, 2, 1)
         pred_box_deltas = self.box_predictor(x).permute(0, 2, 1)
         if not self.cls_agnostic_bbox_reg:
             pred_box_deltas = pred_box_deltas.view(

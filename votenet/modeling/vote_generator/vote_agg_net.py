@@ -24,11 +24,11 @@ class VoteAggregationModule(nn.Module):
         )
 
     def forward(self, xyz, features, seed_xyz):
-        if self.sampling == 'vote_fps':
+        if self.sampling == "vote_fps":
             sample_inds = None
-        elif self.sampling == 'seed_fps':
+        elif self.sampling == "seed_fps":
             sample_inds = furthest_point_sample(seed_xyz, self.num_proposal)
-        elif self.sampling == 'random':
+        elif self.sampling == "random":
             batch_size = seed_xyz.shape[0]
             num_seed = seed_xyz.shape[1]
             sample_inds = torch.randint(0, num_seed, (batch_size, self.num_proposal), dtype=torch.int).cuda()
@@ -36,12 +36,6 @@ class VoteAggregationModule(nn.Module):
             raise NotImplementedError
 
         xyz, features, inds = self.vote_aggregation(xyz, features, sample_inds)
-
-        """
-        end_points['aggregated_vote_xyz'] = xyz  # (batch_size, num_proposal, 3)
-        end_points['aggregated_vote_inds'] = sample_inds  # (batch_size, num_proposal,)
-        end_points['aggregated_vote_features'] = features  # (batch_size, 128, num_propsoal)
-        """
 
         return xyz, features, inds
 

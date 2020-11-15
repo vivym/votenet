@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
-from votenet.layers import huber_loss, batched_nms_3d, nms_3d
+from votenet.layers import huber_loss, batched_nms_3d, nms_3d, sigmoid_focal_loss
 from votenet.utils.registry import Registry
 from votenet.structures import Instances, Boxes, BoxMode
 
@@ -55,6 +55,7 @@ class StandardROIHeads(nn.Module):
             num_classes: int,
             box_reg_loss_weight: float,
             cls_loss_weight: float,
+            cls_loss_type: str,
             objectness_loss_type: str,
             cls_agnostic_bbox_reg: bool,
             pooler: nn.Module,
@@ -65,6 +66,7 @@ class StandardROIHeads(nn.Module):
         self.num_classes = num_classes
         self.box_reg_loss_weight = box_reg_loss_weight
         self.cls_loss_weight = cls_loss_weight
+        self.cls_loss_type = cls_loss_type
         self.objectness_loss_type = objectness_loss_type
         self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
         self.pooler = pooler
@@ -79,6 +81,7 @@ class StandardROIHeads(nn.Module):
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "box_reg_loss_weight": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT,
             "cls_loss_weight": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT,
+            "cls_loss_type": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_TYPE,
             "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
             "cls_agnostic_bbox_reg": cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
             "pooler": ROIGridPooler(grid_size, seed_feature_dim),
@@ -101,7 +104,8 @@ class StandardROIHeads(nn.Module):
 
         if self.training:
             losses = self.losses(
-                pred_objectness_logits, pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
+                pred_objectness_logits, pred_cls_logits, pred_box_deltas,
+                pred_centerness, pred_heading_deltas, proposals
             )
             return None, losses
         else:
@@ -120,7 +124,7 @@ class StandardROIHeads(nn.Module):
     def predict_instances(
             self,
             pred_objectness_logits: Optional[torch.Tensor],  # (bs, num_proposals, 2)
-            pred_cls_logits: torch.Tensor,  # (bs, num_classes, num_proposals)
+            pred_cls_logits: torch.Tensor,  # (bs, num_proposals, num_classes + 1)
             pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes, 6)
             pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
@@ -130,8 +134,8 @@ class StandardROIHeads(nn.Module):
             # objectness = F.softmax(pred_objectness_logits, dim=-2)[:, 1, :]
             pass
 
-        # (bs, num_classes, num_proposals) -> (bs, num_proposals, num_classes)
-        scores = F.softmax(pred_cls_logits, dim=-2).permute(0, 2, 1)
+        # (bs, num_proposals, num_classes + 1)
+        scores = F.softmax(pred_cls_logits, dim=-1)
 
         instances = []
         for i, (scores_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
@@ -204,13 +208,14 @@ class StandardROIHeads(nn.Module):
     def losses(
             self,
             pred_objectness_logits: Optional[torch.Tensor],  # (bs, num_proposals, 2)
-            pred_cls_logits: torch.Tensor,  # (bs, num_classes + 1, num_proposals)
+            pred_cls_logits: torch.Tensor,  # (bs, num_proposals, num_classes + 1)
             pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes, 6)
+            pred_centerness: torch.Tensor, # (bs, num_proposals)
             pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
     ):
         batch_size = pred_cls_logits.size(0)
-        num_proposals = pred_cls_logits.size(-1)
+        num_proposals = pred_cls_logits.size(1)
         normalizer = batch_size * num_proposals
         device = pred_cls_logits.device
         dtype = pred_cls_logits.dtype
@@ -240,33 +245,63 @@ class StandardROIHeads(nn.Module):
                     reduction="sum",
                 ) / normalizer
 
-        losses["loss_cls"] = F.cross_entropy(
-            pred_cls_logits,
-            gt_classes,
-            reduction="mean",
-        ) * self.cls_loss_weight
-
+        valid_mask = gt_classes >= 0
+        if self.cls_loss_type == "cross_entropy":
+            losses["loss_cls"] = F.cross_entropy(
+                pred_cls_logits[valid_mask],
+                gt_classes[valid_mask],
+                reduction="sum",
+            ) / normalizer * self.cls_loss_weight
+        elif self.cls_loss_type == "sigmoid_focal_loss":
+            valid_inds = torch.nonzero(valid_mask, as_tuple=True)
+            valid_gt_classes = gt_classes[valid_inds]
+            gt_classes_one_hot = torch.zeros(
+                valid_gt_classes.size(0), self.num_classes + 1, dtype=dtype, device=device
+            )
+            gt_classes_one_hot_inds = torch.arange(
+                valid_gt_classes.size(0), dtype=torch.int64, device=device
+            )
+            gt_classes_one_hot[gt_classes_one_hot_inds, valid_gt_classes] = 1.
+            losses["loss_cls"] = sigmoid_focal_loss(
+                pred_cls_logits[valid_mask],
+                gt_classes_one_hot,
+                alpha=0.25,
+                gamma=2.0,
+                reduction="sum",
+            ) / normalizer * self.cls_loss_weight
+        else:
+            raise NotImplementedError
 
         fg_inds = torch.nonzero(
             (gt_classes >= 0) & (gt_classes < self.num_classes), as_tuple=True
         )
+        fg_gt_classes = gt_classes[fg_inds]  # (num_fg,)
+        fg_gt_box_deltas = gt_box_deltas[fg_inds]
         if self.cls_agnostic_bbox_reg:
             # TODO: configurable
             losses["loss_box_loc"] = huber_loss(
                 pred_box_deltas[fg_inds],
-                gt_box_deltas[fg_inds],
+                fg_gt_box_deltas,
                 beta=0.15,
                 reduction="sum",
             ) / normalizer * self.box_reg_loss_weight
+            assert pred_centerness is None
         else:
-            fg_gt_classes = gt_classes[fg_inds]   # (num_fg,)
             # TODO: configurable
             losses["loss_box_loc"] = huber_loss(
                 pred_box_deltas[fg_inds + (fg_gt_classes, )],
-                gt_box_deltas[fg_inds],
+                fg_gt_box_deltas,
                 beta=0.15,
                 reduction="sum",
             ) / normalizer * self.box_reg_loss_weight
+
+        if pred_centerness is not None:
+            gt_centerness = torch.stack([x.gt_centerness for x in proposals])
+            losses["loss_box_centerness"] = F.binary_cross_entropy_with_logits(
+                pred_centerness[fg_inds],
+                gt_centerness[fg_inds],
+                reduction="sum",
+            ) / normalizer
 
         if pred_heading_deltas is not None:
             gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])

@@ -27,6 +27,8 @@ class VotingRPN(nn.Module):
             num_classes: int,
             box_reg_loss_weight: float,
             objectness_loss_type: str,
+            threshold: float,
+            threshold2: float,
             rpn_head: nn.Module,
     ):
         super().__init__()
@@ -34,6 +36,8 @@ class VotingRPN(nn.Module):
         self.num_classes = num_classes
         self.box_reg_loss_weight = box_reg_loss_weight
         self.objectness_loss_type = objectness_loss_type
+        self.threshold = threshold
+        self.threshold2 = threshold2
         self.rpn_head = rpn_head
 
     @classmethod
@@ -42,6 +46,8 @@ class VotingRPN(nn.Module):
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "box_reg_loss_weight": cfg.MODEL.RPN.BBOX_REG_LOSS_WEIGHT,
             "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
+            "threshold": cfg.MODEL.RPN.THRESHOLD,
+            "threshold2": cfg.MODEL.RPN.THRESHOLD2,
             "rpn_head": build_rpn_head(cfg),
         }
 
@@ -60,7 +66,8 @@ class VotingRPN(nn.Module):
 
         if self.training:
             assert gt_instances is not None, "RPN requires gt_instances in training!"
-            gt_labels, gt_classes, gt_boxes = self.label_and_sample_proposals(voted_xyz, gt_instances)
+            gt_labels, gt_classes, gt_boxes, gt_centerness = \
+                self.label_and_sample_proposals(voted_xyz, gt_instances)
             if pred_heading_cls_logits is not None:
                 assert all(b.has("angles") for b in gt_boxes)
                 gt_heading_classes, gt_heading_deltas = self.compute_gt_angles(gt_boxes)
@@ -69,6 +76,7 @@ class VotingRPN(nn.Module):
             losses = self.losses(
                 pred_objectness_logits, gt_labels,
                 pred_box_reg, gt_boxes,
+                pred_centerness, gt_centerness,
                 pred_heading_cls_logits, gt_heading_classes,
                 pred_heading_deltas, gt_heading_deltas,
             )
@@ -76,13 +84,14 @@ class VotingRPN(nn.Module):
             gt_labels = None
             gt_classes = None
             gt_boxes = None
+            gt_centerness = None
             gt_heading_classes = None
             gt_heading_deltas = None
             losses = {}
 
         proposals = self.predict_proposals(
             voted_xyz, pred_objectness_logits, pred_box_reg, pred_heading_cls_logits, pred_heading_deltas,
-            gt_labels, gt_classes, gt_boxes, gt_heading_classes, gt_heading_deltas
+            gt_labels, gt_classes, gt_boxes, gt_centerness, gt_heading_classes, gt_heading_deltas
         )
         return proposals, losses
 
@@ -97,11 +106,15 @@ class VotingRPN(nn.Module):
             gt_labels: Optional[torch.Tensor] = None,
             gt_classes: Optional[torch.Tensor] = None,
             gt_boxes: Optional[List["Boxes"]] = None,
+            gt_centerness: Optional[torch.Tensor] = None,
             gt_heading_classes: Optional[torch.Tensor] = None,
             gt_heading_deltas: Optional[torch.Tensor] = None,
     ):
         # TODO: cross_entropy
-        pred_objectness = pred_objectness_logits.detach().sigmoid()
+        if self.objectness_loss_type == "binary_cross_entropy_with_logits":
+            pred_objectness = pred_objectness_logits.detach().sigmoid()
+        else:
+            pred_objectness = pred_objectness_logits.detach().softmax(dim=-1)[..., 1]
 
         if pred_heading_cls_logits is not None:
             if gt_heading_classes is None:
@@ -141,6 +154,9 @@ class VotingRPN(nn.Module):
             if gt_boxes is not None:
                 instances.gt_boxes = gt_boxes[i]
 
+            if gt_centerness is not None:
+                instances.gt_centerness = gt_centerness[i]
+
             if gt_heading_deltas is not None:
                 instances.gt_heading_deltas = gt_heading_deltas[i]
 
@@ -163,6 +179,7 @@ class VotingRPN(nn.Module):
             self,
             pred_objectness_logits: torch.Tensor, gt_labels: torch.Tensor,
             pred_box_reg: torch.Tensor, gt_boxes: List["Boxes"],
+            pred_centerness: Optional[torch.Tensor], gt_centerness: torch.Tensor,
             pred_heading_cls_logits: Optional[torch.Tensor],
             gt_heading_classes: Optional[torch.Tensor],
             pred_heading_deltas: Optional[torch.Tensor],
@@ -200,12 +217,20 @@ class VotingRPN(nn.Module):
             ) / normalizer
 
         gt_box_reg = torch.stack([x.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) for x in gt_boxes])
+        pos_gt_box_reg = gt_box_reg[pos_mask]
         losses["loss_rpn_loc"] = huber_loss(
             pred_box_reg[pos_mask],
-            gt_box_reg[pos_mask],
+            pos_gt_box_reg,
             beta=0.15,
             reduction="sum",
         ) / normalizer * self.box_reg_loss_weight
+
+        if pred_centerness is not None:
+            losses["loss_rpn_centerness"] = F.binary_cross_entropy_with_logits(
+                pred_centerness[pos_mask],
+                gt_centerness[pos_mask],
+                reduction="sum"
+            ) / normalizer
 
         if pred_heading_cls_logits is not None:
             assert pred_heading_deltas is not None
@@ -231,13 +256,14 @@ class VotingRPN(nn.Module):
     @torch.no_grad()
     def label_and_sample_proposals(
             self, proposal_xyz: torch.Tensor, gt_instances: List[Instances]
-    ) -> Tuple[torch.Tensor, torch.Tensor, List["Boxes"]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, List["Boxes"], torch.Tensor]:
         device = proposal_xyz.device
         num_proposals = proposal_xyz.size(1)
 
         gt_labels = []
         gt_classes = []
         gt_boxes = []
+        gt_centerness = []
         for (proposal_xyz_i, gt_instances_i) in zip(proposal_xyz, gt_instances):
             gt_classes_i = gt_instances_i.gt_classes
             gt_centers_i = gt_instances_i.gt_boxes.get_centers()
@@ -247,21 +273,51 @@ class VotingRPN(nn.Module):
 
             gt_classes_i = gt_classes_i[inds]
             gt_sizes_i = gt_sizes_i[inds, :]
-            threshold = torch.sum(gt_sizes_i, dim=-1) / 6 * (2 / 3)
-            threshold = threshold ** 2
-            gt_labels_i = torch.zeros(num_proposals, dtype=torch.int64, device=device)
-            gt_labels_i[dists < threshold] = 1
-            # TODO: gt_labels_i[dists < threshold2] = -1
-            gt_classes_i[dists >= threshold] = self.num_classes  # background
 
             gt_boxes_i = gt_instances_i.gt_boxes[inds, :]
             gt_boxes_i = gt_boxes_i.convert(BoxMode.XYZLBDRFU_ABS, origins=proposal_xyz_i)
 
+            # TODO: dynamic threshold
+
+            if self.threshold == -1.:
+                mean_half_sizes = torch.sum(gt_sizes_i, dim=-1) / 6
+                threshold = mean_half_sizes * (2 / 3)
+                threshold2 = mean_half_sizes
+            else:
+                threshold = self.threshold
+                threshold2 = self.threshold2
+            threshold = threshold ** 2
+            threshold2 = threshold2 ** 2
+
+            # TODO: consider angles
+            assert not gt_instances_i.gt_boxes.has("angles")
+            inside_mask = (gt_boxes_i.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) >= 0.).all(dim=-1)
+
+            gt_labels_i = torch.zeros(num_proposals, dtype=torch.int64, device=device)
+            pos_mask = (dists < threshold) & inside_mask
+            gt_labels_i[pos_mask] = 1
+            ignore_mask = (~pos_mask) & (dists < threshold2)
+            gt_labels_i[ignore_mask] = -1
+            gt_classes_i[ignore_mask] = -1
+            neg_mask = (~pos_mask) & (dists >= threshold2)
+            gt_classes_i[neg_mask] = self.num_classes  # background
+
+            tensor = gt_boxes_i.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS)
+            deltas = torch.cat(
+                (tensor[:, 0:3, None], tensor[:, 3:6, None]),
+                dim=-1,
+            )
+            nominators = deltas.min(dim=-1).values.prod(dim=-1)
+            denominators = deltas.max(dim=-1).values.prod(dim=-1) + 1e-6
+            gt_centerness_i = (nominators / denominators + 1e-6) ** 0.5
+
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)
             gt_boxes.append(gt_boxes_i)
+            gt_centerness.append(gt_centerness_i)
 
         gt_labels = torch.stack(gt_labels)
         gt_classes = torch.stack(gt_classes)
+        gt_centerness = torch.stack(gt_centerness)
 
-        return gt_labels, gt_classes, gt_boxes
+        return gt_labels, gt_classes, gt_boxes, gt_centerness

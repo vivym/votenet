@@ -127,6 +127,7 @@ class PointCloudEvaluation(DatasetEvaluator):
         del predictions
 
         aps = defaultdict(list)
+        ars = defaultdict(list)
         # TODO: get class ids from Metadata
         for cls in all_gt_boxes.keys():
             for thresh in [25, 50]:
@@ -137,9 +138,14 @@ class PointCloudEvaluation(DatasetEvaluator):
                     use_07_metric=False,
                 )
                 aps[thresh].append(ap * 100)
+                ars[thresh].append(rec[-1] * 100)
 
         mAP = {iou: np.mean(x) for iou, x in aps.items()}
-        self._results["bbox"] = {"AP": np.mean(list(mAP.values())), "AP25": mAP[25], "AP50": mAP[50]}
+        mAR = {iou: np.mean(x) for iou, x in ars.items()}
+        self._results["bbox"] = {
+            "AP": np.mean(list(mAP.values())), "AP25": mAP[25], "AP50": mAP[50],
+            "AR": np.mean(list(mAR.values())), "AR25": mAR[25], "AR50": mAR[50],
+        }
 
     def _eval_box_proposals(self, predictions):
         """

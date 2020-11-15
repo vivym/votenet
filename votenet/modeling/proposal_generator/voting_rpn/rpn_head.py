@@ -42,22 +42,26 @@ class StandardRPNHead(nn.Module):
         ]
         self.convs = nn.Sequential(*convs)
 
-        # objectness(1) + box_reg(6)
-        out_channels = 1 if objectness_loss_type == "binary_cross_entropy_with_logits" else 2 + 6
-        if not use_axis_aligned_box:
-            out_channels += 12 * 2
+        self.objectness_predictor = nn.Conv1d(
+            128, 1 if objectness_loss_type == "binary_cross_entropy_with_logits" else 2,
+            kernel_size=1,
+        )
+        self.box_predictor = nn.Conv1d(128, 6, kernel_size=1)
+        predictors = [self.objectness_predictor, self.box_predictor]
+        # TODO:
+        assert use_axis_aligned_box
         if use_centerness:
-            out_channels += 1
-
-        self.predictor = nn.Conv1d(128, out_channels, kernel_size=1)
+            self.centerness_predictor = nn.Conv1d(128, 1, kernel_size=1)
+            predictors.append(self.centerness_predictor)
 
         for layer in convs:
             if isinstance(layer, nn.Conv1d):
                 weight_init.c2_msra_fill(layer)
 
-        nn.init.normal_(self.predictor.weight, std=0.001)
-        if self.predictor.bias is not None:
-            nn.init.constant_(self.predictor.bias, 0)
+        for predictor in predictors:
+            nn.init.normal_(predictor.weight, std=0.001)
+            if predictor.bias is not None:
+                nn.init.constant_(predictor.bias, 0)
 
     @classmethod
     def from_config(cls, cfg):
@@ -82,28 +86,22 @@ class StandardRPNHead(nn.Module):
                 to proposals.
         """
         x = self.convs(x)
-        x = self.predictor(x).permute(0, 2, 1)  # (bs, num_proposals, c)
 
-        if self.objectness_loss_type == "binary_cross_entropy_with_logits":
-            pred_objectness_logits = x[:, :, 0]  # (bs, num_proposals)
-            idx = 1
-        else:
-            pred_objectness_logits = x[:, :, 0:2]
-            idx = 2
-        pred_box_reg = x[:, :, idx:idx + 6]
-        idx += 6
+        # (bs, num_proposals, 2)
+        pred_objectness_logits = self.objectness_predictor(x).permute(0, 2, 1)
+        # (bs, num_proposals, 6)
+        pred_box_reg = self.box_predictor(x).permute(0, 2, 1)
         if self.use_exp:
             pred_box_reg = pred_box_reg.exp()
 
         pred_heading_cls_logits, pred_heading_deltas = None, None
-        if not self.use_axis_aligned_box:
-            pred_heading_cls_logits = x[:, :, idx:idx + 12]
-            pred_heading_deltas = x[:, :, idx + 12:idx + 24]
 
-            idx += 24
+        # TODO:
+        assert self.use_axis_aligned_box
 
         pred_centerness = None
         if self.use_centerness:
-            pred_centerness = x[:, :, idx]
+            # (bs, num_proposals)
+            pred_centerness = self.centerness_predictor(x).squeeze(1)
 
         return pred_objectness_logits, pred_box_reg, pred_heading_cls_logits, pred_heading_deltas, pred_centerness

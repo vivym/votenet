@@ -1,4 +1,5 @@
 from .ball_query import ball_query
+from .focal_loss import sigmoid_focal_loss_jit, sigmoid_focal_loss
 from .group_points import grouping_operation, QueryAndGroup, GroupAll
 from .interpolate import three_nn, three_interpolate
 from .loss_func import smooth_l1_loss, huber_loss
