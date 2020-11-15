@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
-from votenet.layers import nn_distance, huber_loss
+from votenet.layers import nn_distance, huber_loss, sigmoid_focal_loss
 from votenet.structures import Instances, Boxes, BoxMode
 from votenet.utils.events import get_event_storage
 
@@ -25,6 +25,7 @@ class VotingRPN(nn.Module):
             self,
             *,
             num_classes: int,
+            centerness_loss_weight: float,
             box_reg_loss_weight: float,
             objectness_loss_type: str,
             threshold: float,
@@ -34,18 +35,24 @@ class VotingRPN(nn.Module):
         super().__init__()
 
         self.num_classes = num_classes
+        self.centerness_loss_weight = centerness_loss_weight
         self.box_reg_loss_weight = box_reg_loss_weight
         self.objectness_loss_type = objectness_loss_type
         self.threshold = threshold
         self.threshold2 = threshold2
         self.rpn_head = rpn_head
 
+        # 100 is for 8 scans per gpu
+        self.loss_normalizer = 100  # initialize with any reasonable #fg that's not too small
+        self.loss_normalizer_momentum = 0.9
+
     @classmethod
     def from_config(cls, cfg):
         ret = {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+            "centerness_loss_weight": cfg.MODEL.RPN.CENTERNESS_LOSS_WEIGHT,
             "box_reg_loss_weight": cfg.MODEL.RPN.BBOX_REG_LOSS_WEIGHT,
-            "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
+            "objectness_loss_type": cfg.MODEL.RPN.OBJECTNESS_LOSS_TYPE,
             "threshold": cfg.MODEL.RPN.THRESHOLD,
             "threshold2": cfg.MODEL.RPN.THRESHOLD2,
             "rpn_head": build_rpn_head(cfg),
@@ -62,7 +69,7 @@ class VotingRPN(nn.Module):
         # TODO: pack xyz / features / inds up like Instances
 
         pred_objectness_logits, pred_box_reg, pred_heading_cls_logits, pred_heading_deltas, pred_centerness = \
-            self.rpn_head(voted_features)
+            self.rpn_head(voted_xyz, voted_features)
 
         if self.training:
             assert gt_instances is not None, "RPN requires gt_instances in training!"
@@ -111,7 +118,7 @@ class VotingRPN(nn.Module):
             gt_heading_deltas: Optional[torch.Tensor] = None,
     ):
         # TODO: cross_entropy
-        if self.objectness_loss_type == "binary_cross_entropy_with_logits":
+        if self.objectness_loss_type != "cross_entropy":
             pred_objectness = pred_objectness_logits.detach().sigmoid()
         else:
             pred_objectness = pred_objectness_logits.detach().softmax(dim=-1)[..., 1]
@@ -185,9 +192,7 @@ class VotingRPN(nn.Module):
             pred_heading_deltas: Optional[torch.Tensor],
             gt_heading_deltas: Optional[torch.Tensor],
     ):
-        batch_size = pred_box_reg.size(0)
-        num_proposals = pred_box_reg.size(1)
-        normalizer = batch_size * num_proposals
+        num_all_proposals = pred_box_reg.size(0) * pred_box_reg.size(1)
         device = pred_box_reg.device
         dtype = pred_box_reg.dtype
 
@@ -195,26 +200,42 @@ class VotingRPN(nn.Module):
         num_pos = pos_mask.sum().item()
         num_neg = (gt_labels == 0).sum().item()
         storage = get_event_storage()
-        storage.put_scalar("rpn/pos_ratio", num_pos / normalizer)
-        storage.put_scalar("rpn/neg_ratio", num_neg / normalizer)
+        storage.put_scalar("rpn/pos_ratio", num_pos / num_all_proposals)
+        storage.put_scalar("rpn/neg_ratio", num_neg / num_all_proposals)
+        storage.put_scalar("rpn/ignore_ratio", (num_all_proposals - num_pos - num_neg) / num_all_proposals)
+
+        self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
+                1 - self.loss_normalizer_momentum
+        ) * max(num_pos, 1)
 
         # TODO: make box_reg_loss_type configurable
         losses = {}
 
         valid_mask = gt_labels >= 0
         if self.objectness_loss_type == "binary_cross_entropy_with_logits":
+            assert False
             losses["loss_objectness"] = F.binary_cross_entropy_with_logits(
-                pred_objectness_logits[valid_mask],
+                pred_objectness_logits[valid_mask].squeeze(-1),
                 gt_labels[valid_mask].float(),
                 reduction="sum",
-            ) / normalizer
-        else:  # cross_entropy
+            ) / self.loss_normalizer
+        elif self.objectness_loss_type == "cross_entropy":
             losses["loss_objectness"] = F.cross_entropy(
                 pred_objectness_logits[valid_mask],
-                gt_labels[valid_mask].long(),
+                gt_labels[valid_mask],
                 weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
+                reduction="mean",
+            )
+        elif self.objectness_loss_type == "sigmoid_focal_loss":
+            losses["loss_objectness"] = sigmoid_focal_loss(
+                pred_objectness_logits[valid_mask].squeeze(-1),
+                gt_labels[valid_mask].to(dtype=pred_objectness_logits.dtype),
+                alpha=0.25,
+                gamma=2.0,
                 reduction="sum",
-            ) / normalizer
+            ) / self.loss_normalizer
+        else:
+            raise NotImplementedError
 
         gt_box_reg = torch.stack([x.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) for x in gt_boxes])
         pos_gt_box_reg = gt_box_reg[pos_mask]
@@ -223,14 +244,14 @@ class VotingRPN(nn.Module):
             pos_gt_box_reg,
             beta=0.15,
             reduction="sum",
-        ) / normalizer * self.box_reg_loss_weight
+        ) / pred_box_reg.size(-1) / self.loss_normalizer * self.box_reg_loss_weight
 
         if pred_centerness is not None:
             losses["loss_rpn_centerness"] = F.binary_cross_entropy_with_logits(
                 pred_centerness[pos_mask],
                 gt_centerness[pos_mask],
                 reduction="sum"
-            ) / normalizer
+            ) / self.loss_normalizer * self.centerness_loss_weight
 
         if pred_heading_cls_logits is not None:
             assert pred_heading_deltas is not None
@@ -239,7 +260,7 @@ class VotingRPN(nn.Module):
                 pred_heading_cls_logits[pos_mask],
                 gt_heading_classes,
                 reduction="sum",
-            ) / normalizer
+            ) / self.loss_normalizer
 
             batch_inds, proposal_inds = torch.nonzero(pos_mask, as_tuple=True)
             losses["loss_rpn_angle_delta"] = huber_loss(
@@ -247,7 +268,7 @@ class VotingRPN(nn.Module):
                 gt_heading_deltas[pos_mask],
                 beta=1.0,
                 reduction="sum",
-            ) / normalizer
+            ) / self.loss_normalizer
 
         # TODO: loss weight
         return losses
@@ -309,7 +330,7 @@ class VotingRPN(nn.Module):
             )
             nominators = deltas.min(dim=-1).values.prod(dim=-1)
             denominators = deltas.max(dim=-1).values.prod(dim=-1) + 1e-6
-            gt_centerness_i = (nominators / denominators + 1e-6) ** 0.5
+            gt_centerness_i = (nominators / denominators + 1e-6) ** 0.3
 
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)

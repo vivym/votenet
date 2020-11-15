@@ -123,11 +123,11 @@ class PointNet2(Backbone):
             outputs["sa2"]["xyz"], outputs["sa3"]["xyz"],
             outputs["sa2"]["features"], features,
         )
-        num_seed = outputs["sa2"]["xyz"].size(1)
+        num_seeds = outputs["sa2"]["xyz"].size(1)
         outputs["fp2"] = {
             "xyz": outputs["sa2"]["xyz"],
             "features": features,
-            "inds": outputs["sa1"]["inds"][:, :num_seed]
+            "inds": outputs["sa1"]["inds"][:, :num_seeds]
         }
 
         return outputs

@@ -48,10 +48,10 @@ class VotingModule(nn.Module):
         num_votes = num_seeds * self.vote_factor
         x = F.relu(self.bn1(self.conv1(seed_features)))
         x = F.relu(self.bn2(self.conv2(x)))
-        x = self.conv3(x)  # (batch_size, (3+out_dim)*vote_factor, num_seed)
+        x = self.conv3(x)  # (batch_size, (3+out_dim)*vote_factor, num_seeds)
 
         x = x.transpose(2, 1).view(batch_size, num_seeds, self.vote_factor, 3 + self.out_dim)
-        offset = x[:, :, :, 0:3]
+        offset = x[:, :, :, :3]
         vote_xyz = seed_xyz.unsqueeze(2) + offset
         vote_xyz = vote_xyz.reshape(batch_size, num_votes, 3)
 

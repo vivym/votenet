@@ -1,9 +1,9 @@
 import fvcore.nn.weight_init as weight_init
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from votenet.config import configurable
+from votenet.layers import build_positional_encoding_layer
 
 from ..rpn_head import RPN_HEAD_REGISTRY
 
@@ -24,6 +24,8 @@ class StandardRPNHead(nn.Module):
             use_centerness: bool,
             use_exp: bool,
             objectness_loss_type: str,
+            fuse_xyz: int,
+            fuse_xyz_type: str,
     ):
         super().__init__()
 
@@ -31,9 +33,19 @@ class StandardRPNHead(nn.Module):
         self.use_centerness = use_centerness
         self.use_exp = use_exp
         self.objectness_loss_type = objectness_loss_type
+        self.fuse_xyz = fuse_xyz
+        self.fuse_xyz_type = fuse_xyz_type
+
+        if fuse_xyz > 0:
+            self.positional_encoding = build_positional_encoding_layer(
+                fuse_xyz_type, dim=fuse_xyz, fuse_type="cat"
+            )
+            num_extra_channels = self.positional_encoding.num_extra_channels
+        else:
+            num_extra_channels = 0
 
         convs = [
-            nn.Conv1d(128, 128, kernel_size=1),
+            nn.Conv1d(128 + num_extra_channels, 128, kernel_size=1),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             nn.Conv1d(128, 128, kernel_size=1),
@@ -43,7 +55,7 @@ class StandardRPNHead(nn.Module):
         self.convs = nn.Sequential(*convs)
 
         self.objectness_predictor = nn.Conv1d(
-            128, 1 if objectness_loss_type == "binary_cross_entropy_with_logits" else 2,
+            128, 2 if objectness_loss_type == "cross_entropy" else 1,
             kernel_size=1,
         )
         self.box_predictor = nn.Conv1d(128, 6, kernel_size=1)
@@ -69,13 +81,16 @@ class StandardRPNHead(nn.Module):
             "use_axis_aligned_box": cfg.INPUT.AXIS_ALIGNED_BOX,
             "use_centerness": cfg.MODEL.RPN.CENTERNESS,
             "use_exp": cfg.MODEL.RPN.USE_EXP,
-            "objectness_loss_type": cfg.MODEL.ROI_BOX_HEAD.OBJECTNESS_LOSS_TYPE,
+            "objectness_loss_type": cfg.MODEL.RPN.OBJECTNESS_LOSS_TYPE,
+            "fuse_xyz": cfg.MODEL.RPN.FUSE_XYZ,
+            "fuse_xyz_type": cfg.MODEL.RPN.FUSE_XYZ_TYPE,
         }
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, xyz: torch.Tensor, features: torch.Tensor):
         """
         Args:
-            x (Tensor): feature map
+            xyz(Tensor): xyz
+            features (Tensor): feature map
 
         Returns:
             list[Tensor]: A list of L elements.
@@ -85,7 +100,10 @@ class StandardRPNHead(nn.Module):
                 (N, A*box_dim, Hi, Wi) representing the predicted "deltas" used to transform anchors
                 to proposals.
         """
-        x = self.convs(x)
+        if self.fuse_xyz > 0:
+            features = self.positional_encoding(xyz.permute(0, 2, 1), features)
+
+        x = self.convs(features)
 
         # (bs, num_proposals, 2)
         pred_objectness_logits = self.objectness_predictor(x).permute(0, 2, 1)

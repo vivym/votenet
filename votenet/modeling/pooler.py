@@ -41,7 +41,6 @@ class ROIGridPooler(nn.Module):
         device = seed_xyz.device
 
         # TODO: support different modes of boxes
-        assert proposals[0].proposal_boxes.mode == BoxMode.XYZLBDRFU_ABS
         pred_box_reg = torch.stack(
             [x.proposal_boxes.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS) for x in proposals]
         )

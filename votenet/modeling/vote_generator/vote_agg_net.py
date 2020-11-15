@@ -6,16 +6,16 @@ from votenet.modeling.backbone import PointnetSAModuleVotes
 
 
 class VoteAggregationModule(nn.Module):
-    def __init__(self, num_proposal, sampling, seed_feat_dim=256):
+    def __init__(self, num_proposals, sampling, seed_feat_dim=256):
         super().__init__()
 
-        self.num_proposal = num_proposal
+        self.num_proposals = num_proposals
         self.sampling = sampling
         self.seed_feat_dim = seed_feat_dim
 
         # Vote clustering/aggregation
         self.vote_aggregation = PointnetSAModuleVotes(
-            npoint=self.num_proposal,
+            npoint=self.num_proposals,
             radius=0.3,
             nsample=16,
             mlp=[self.seed_feat_dim, 128, 128, 128],
@@ -27,11 +27,11 @@ class VoteAggregationModule(nn.Module):
         if self.sampling == "vote_fps":
             sample_inds = None
         elif self.sampling == "seed_fps":
-            sample_inds = furthest_point_sample(seed_xyz, self.num_proposal)
+            sample_inds = furthest_point_sample(seed_xyz, self.num_proposals)
         elif self.sampling == "random":
             batch_size = seed_xyz.shape[0]
             num_seed = seed_xyz.shape[1]
-            sample_inds = torch.randint(0, num_seed, (batch_size, self.num_proposal), dtype=torch.int).cuda()
+            sample_inds = torch.randint(0, num_seed, (batch_size, self.num_proposals), dtype=torch.int).cuda()
         else:
             raise NotImplementedError
 
