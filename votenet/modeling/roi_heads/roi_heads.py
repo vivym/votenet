@@ -53,6 +53,7 @@ class StandardROIHeads(nn.Module):
             self,
             *,
             num_classes: int,
+            centerness_loss_weight: float,
             box_reg_loss_weight: float,
             cls_loss_weight: float,
             cls_loss_type: str,
@@ -63,6 +64,7 @@ class StandardROIHeads(nn.Module):
         super().__init__()
 
         self.num_classes = num_classes
+        self.centerness_loss_weight = centerness_loss_weight
         self.box_reg_loss_weight = box_reg_loss_weight
         self.cls_loss_weight = cls_loss_weight
         self.cls_loss_type = cls_loss_type
@@ -81,6 +83,7 @@ class StandardROIHeads(nn.Module):
 
         return {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+            "centerness_loss_weight": cfg.MODEL.ROI_BOX_HEAD.CENTERNESS_LOSS_WEIGHT,
             "box_reg_loss_weight": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT,
             "cls_loss_weight": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT,
             "cls_loss_type": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_TYPE,
@@ -282,7 +285,7 @@ class StandardROIHeads(nn.Module):
                 pred_centerness[fg_inds],
                 gt_centerness[fg_inds],
                 reduction="sum",
-            ) / self.loss_normalizer
+            ) / self.loss_normalizer * self.centerness_loss_weight
 
         if pred_heading_deltas is not None:
             gt_heading_deltas = torch.stack([x.gt_heading_deltas for x in proposals])

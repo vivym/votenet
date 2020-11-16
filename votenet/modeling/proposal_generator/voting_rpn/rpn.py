@@ -174,8 +174,9 @@ class VotingRPN(nn.Module):
                     keep = keep[:256]
                 else:
                     # TODO: more smart strategies
-                    _, inds = objectness_scores_i.sort(descending=True, dim=-1)
-                    keep = torch.cat([keep, inds[:256 - keep.size(0)]], dim=-1)
+                    inds = torch.multinomial(objectness_scores_i, 256 - keep.size(0), replacement=True)
+                    # _, inds = objectness_scores_i.sort(descending=True, dim=-1)
+                    keep = torch.cat([keep, inds], dim=-1)
             else:
                 keep = torch.arange(
                     pred_objectness_scores_i.size(0), dtype=torch.int64,
@@ -378,7 +379,7 @@ class VotingRPN(nn.Module):
             )
             nominators = deltas.min(dim=-1).values.prod(dim=-1)
             denominators = deltas.max(dim=-1).values.prod(dim=-1) + 1e-6
-            gt_centerness_i = (nominators / denominators + 1e-6) ** 0.3
+            gt_centerness_i = (nominators / denominators + 1e-6) ** (1 / 3)
 
             gt_labels.append(gt_labels_i)
             gt_classes.append(gt_classes_i)
