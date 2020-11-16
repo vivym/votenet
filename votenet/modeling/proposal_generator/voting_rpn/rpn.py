@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from votenet.config import configurable
-from votenet.layers import nn_distance, huber_loss, sigmoid_focal_loss
+from votenet.layers import nn_distance, huber_loss, sigmoid_focal_loss, nms_3d
 from votenet.structures import Instances, Boxes, BoxMode
 from votenet.utils.events import get_event_storage
 
@@ -32,6 +32,8 @@ class VotingRPN(nn.Module):
             threshold: float,
             threshold2: float,
             use_threshold2: bool,
+            use_nms: bool,
+            nms_threshold: float,
             rpn_head: nn.Module,
     ):
         super().__init__()
@@ -44,6 +46,8 @@ class VotingRPN(nn.Module):
         self.threshold = threshold
         self.threshold2 = threshold2
         self.use_threshold2 = use_threshold2
+        self.use_nms = use_nms
+        self.nms_threshold = nms_threshold
         self.rpn_head = rpn_head
 
         # 100 is for 8 scans per gpu
@@ -61,6 +65,8 @@ class VotingRPN(nn.Module):
             "threshold": cfg.MODEL.RPN.THRESHOLD,
             "threshold2": cfg.MODEL.RPN.THRESHOLD2,
             "use_threshold2": cfg.MODEL.RPN.USE_THRESHOLD2,
+            "use_nms": cfg.MODEL.RPN.USE_NMS,
+            "nms_threshold": cfg.MODEL.RPN.NMS_THRESHOLD,
             "rpn_head": build_rpn_head(cfg),
         }
 
@@ -149,29 +155,53 @@ class VotingRPN(nn.Module):
                 pred_objectness_scores, proposal_xyz.detach(), pred_box_reg.detach()
         )):
             instances = Instances()
-            instances.objectness_scores = pred_objectness_scores_i.detach()
-            instances.proposal_boxes = Boxes.from_tensor(
+
+            objectness_scores_i = pred_objectness_scores_i.detach()
+            proposal_boxes_i = Boxes.from_tensor(
                 pred_box_reg_i,
                 mode=BoxMode.XYZLBDRFU_ABS,
                 origins=pred_origins_i,
             )
+
+            if self.use_nms:
+                # TODO: objectness_scores_i * centerness_scores_i
+                keep = nms_3d(
+                    proposal_boxes_i.get_tensor(mode=BoxMode.XYZXYZ_ABS),
+                    objectness_scores_i,
+                    self.nms_threshold,
+                )
+                if keep.size(0) >= 256:
+                    keep = keep[:256]
+                else:
+                    # TODO: more smart strategies
+                    _, inds = objectness_scores_i.sort(descending=True, dim=-1)
+                    keep = torch.cat([keep, inds[:256 - keep.size(0)]], dim=-1)
+            else:
+                keep = torch.arange(
+                    pred_objectness_scores_i.size(0), dtype=torch.int64,
+                    device=pred_objectness_scores_i.device,
+                )
+
+            instances.objectness_scores = objectness_scores_i[keep]
+            instances.proposal_boxes = proposal_boxes_i[keep]
+            instances.inds = keep
             if pred_heading_angles is not None:
-                instances.pred_heading_angles = pred_heading_angles[i]
+                instances.pred_heading_angles = pred_heading_angles[i][keep]
 
             if gt_labels is not None:
-                instances.gt_labels = gt_labels[i]
+                instances.gt_labels = gt_labels[i][keep]
 
             if gt_classes is not None:
-                instances.gt_classes = gt_classes[i]
+                instances.gt_classes = gt_classes[i][keep]
 
             if gt_boxes is not None:
-                instances.gt_boxes = gt_boxes[i]
+                instances.gt_boxes = gt_boxes[i][keep]
 
             if gt_centerness is not None:
-                instances.gt_centerness = gt_centerness[i]
+                instances.gt_centerness = gt_centerness[i][keep]
 
             if gt_heading_deltas is not None:
-                instances.gt_heading_deltas = gt_heading_deltas[i]
+                instances.gt_heading_deltas = gt_heading_deltas[i][keep]
 
             proposals.append(instances)
 
@@ -213,7 +243,6 @@ class VotingRPN(nn.Module):
         self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
                 1 - self.loss_normalizer_momentum
         ) * max(num_pos, 1)
-        self.loss_normalizer = max(num_pos, 1)
 
         # TODO: make box_reg_loss_type configurable
         losses = {}

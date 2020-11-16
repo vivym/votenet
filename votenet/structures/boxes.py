@@ -286,13 +286,14 @@ class Boxes(object, metaclass=ABCMeta):
         """
         cls = type(self)
         if isinstance(item, int):
-            return cls(self._tensor[item].view(1, -1))
+            return cls(self._tensor[item].view(1, -1), **self._fields)
         b = self._tensor[item]
         assert b.dim() == 2, "Indexing on Boxes with {} failed to return a matrix!".format(item)
 
-        ret = cls(b)
+        kwargs = {}
         for k, v in self._fields.items():
-            ret.set(k, v[item])
+            kwargs[k] = v[item]
+        ret = cls(b, **kwargs)
 
         return ret
 
@@ -321,9 +322,7 @@ class Boxes(object, metaclass=ABCMeta):
         assert all([type(box) == type(boxes_list[0]) for box in boxes_list])
         type_cls = type(boxes_list[0])
 
-        # use torch.cat (v.s. layers.cat) so the returned boxes never share storage with input
-        cat_boxes = type_cls(torch.cat([b._tensor for b in boxes_list], dim=0))
-
+        kwargs = {}
         for k in boxes_list[0]._fields.keys():
             values = [i.get(k) for i in boxes_list]
             v0 = values[0]
@@ -335,7 +334,10 @@ class Boxes(object, metaclass=ABCMeta):
                 values = type(v0).cat(values)
             else:
                 raise ValueError("Unsupported type {} for concatenation".format(type(v0)))
-            cat_boxes.set(k, values)
+            kwargs[k] = values
+
+        # use torch.cat (v.s. layers.cat) so the returned boxes never share storage with input
+        cat_boxes = type_cls(torch.cat([b._tensor for b in boxes_list], dim=0), **kwargs)
 
         return cat_boxes
 

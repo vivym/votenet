@@ -111,6 +111,8 @@ _C.MODEL.RPN.THRESHOLD2 = 0.45
 _C.MODEL.RPN.FUSE_XYZ = 0
 _C.MODEL.RPN.FUSE_XYZ_TYPE = "Identity"
 _C.MODEL.RPN.USE_THRESHOLD2 = False
+_C.MODEL.RPN.USE_NMS = False
+_C.MODEL.RPN.NMS_THRESHOLD = 0.5
 
 
 # ---------------------------------------------------------------------------- #

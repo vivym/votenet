@@ -98,6 +98,10 @@ class StandardROIHeads(nn.Module):
     ):
         pooled_features = self.pooler(seed_xyz, seed_features, proposals)
         # TODO: more fusion strategy
+        voted_features = torch.stack([
+            voted_features_i.permute(1, 0)[proposals_i.inds]
+            for (voted_features_i, proposals_i) in zip(voted_features, proposals)
+        ]).permute(0, 2, 1)
         features = torch.cat([voted_features, pooled_features], dim=1)
 
         pred_cls_logits, pred_box_deltas, pred_heading_deltas, pred_centerness = \
@@ -139,8 +143,6 @@ class StandardROIHeads(nn.Module):
         for i, (scores_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
                 scores, pred_box_deltas.detach(), proposals
         )):
-            objectness_scores = proposals_i.objectness_scores
-
             # (num_proposals, 6)
             proposal_boxes_i = proposals_i.proposal_boxes.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS)
             if self.cls_agnostic_bbox_reg:
@@ -228,7 +230,6 @@ class StandardROIHeads(nn.Module):
         self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
                 1 - self.loss_normalizer_momentum
         ) * max(num_fg, 1)
-        self.loss_normalizer = max(num_fg, 1)
 
         valid_pred_cls_logits = pred_cls_logits[valid_mask]
         valid_gt_classes = gt_classes[valid_mask]
