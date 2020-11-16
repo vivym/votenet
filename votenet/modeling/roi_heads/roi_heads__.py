@@ -130,10 +130,8 @@ class StandardROIHeads(nn.Module):
             proposals: List[Instances],
     ):
         # (bs, num_proposals, num_classes + 1)
-        if self.cls_loss_type == "cross_entropy":
-            scores = F.softmax(pred_cls_logits, dim=-1)
-        else:
-            scores = pred_cls_logits.sigmoid()
+        # TODO: sigmoid
+        scores = F.softmax(pred_cls_logits, dim=-1)
 
         instances = []
         for i, (scores_i, pred_box_deltas_i, proposals_i) in enumerate(zip(
@@ -160,11 +158,12 @@ class StandardROIHeads(nn.Module):
             )
             # (num_proposals, num_classes + 1) -> (num_proposals, num_classes)
             scores_i = scores_i[:, :self.num_classes]
+            objectness_scores = objectness_scores[:, None].repeat(1, self.num_classes)
 
             # 1. Filter results based on detection scores. It can make NMS more efficient
             #    by filtering out low-confidence detections.
             # TODO: make it configurable
-            filter_mask = scores_i > 0.05  # score_thresh  # R x K
+            filter_mask = objectness_scores > 0.05  # score_thresh  # R x K
             # R' x 2. First column contains indices of the R predictions;
             # Second column contains indices of classes.
             filter_inds = filter_mask.nonzero(as_tuple=False)
@@ -173,18 +172,20 @@ class StandardROIHeads(nn.Module):
             else:
                 pred_boxes_i = pred_boxes_i[filter_mask]
             scores_i = scores_i[filter_mask]
+            objectness_scores = objectness_scores[filter_mask]
 
             # 2. Apply NMS for each class independently.
             # TODO: make it configurable
             if self.cls_agnostic_bbox_reg:
                 keep = nms_3d(pred_boxes_i, scores_i, 0.25)
             else:
-                keep = batched_nms_3d(pred_boxes_i, scores_i, filter_inds[:, 1], 0.25)
+                keep = batched_nms_3d(pred_boxes_i, objectness_scores, filter_inds[:, 1], 0.25)
                 topk_per_image = 256
                 if topk_per_image >= 0:
                     keep = keep[:topk_per_image]
 
             pred_boxes_i, scores_i, filter_inds = pred_boxes_i[keep], scores_i[keep], filter_inds[keep]
+            objectness_scores = objectness_scores[keep]
 
             if pred_heading_deltas is not None:
                 """
@@ -200,7 +201,7 @@ class StandardROIHeads(nn.Module):
             instances_i = Instances()
             instances_i.pred_classes = filter_inds[:, 1]
             instances_i.pred_boxes = pred_boxes_i.convert(BoxMode.XYZWDH_ABS)
-            instances_i.scores = scores_i
+            instances_i.scores = scores_i * objectness_scores
             instances.append(instances_i)
 
         return instances

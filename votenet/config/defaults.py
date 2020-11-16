@@ -105,10 +105,12 @@ _C.MODEL.RPN.CENTERNESS_LOSS_WEIGHT = 1.0
 _C.MODEL.RPN.BBOX_REG_LOSS_WEIGHT = 1.0
 _C.MODEL.RPN.USE_EXP = False
 _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = "binary_cross_entropy_with_logits"
+_C.MODEL.RPN.OBJECTNESS_LOSS_WEIGHT = 1.0
 _C.MODEL.RPN.THRESHOLD = 0.3
 _C.MODEL.RPN.THRESHOLD2 = 0.45
 _C.MODEL.RPN.FUSE_XYZ = 0
 _C.MODEL.RPN.FUSE_XYZ_TYPE = "Identity"
+_C.MODEL.RPN.USE_THRESHOLD2 = False
 
 
 # ---------------------------------------------------------------------------- #

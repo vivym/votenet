@@ -87,7 +87,7 @@ at::Tensor nms_3d_cpu(
   TORCH_CHECK(
       dets.dim() == 2, "boxes should be a 2d tensor, got ", dets.dim(), "D");
   TORCH_CHECK(
-      dets.size(1) == 4,
+      dets.size(1) == 6,
       "boxes should have 6 elements in dimension 1, got ",
       dets.size(1));
   TORCH_CHECK(

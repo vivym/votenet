@@ -28,8 +28,10 @@ class VotingRPN(nn.Module):
             centerness_loss_weight: float,
             box_reg_loss_weight: float,
             objectness_loss_type: str,
+            objectness_loss_weight: float,
             threshold: float,
             threshold2: float,
+            use_threshold2: bool,
             rpn_head: nn.Module,
     ):
         super().__init__()
@@ -38,8 +40,10 @@ class VotingRPN(nn.Module):
         self.centerness_loss_weight = centerness_loss_weight
         self.box_reg_loss_weight = box_reg_loss_weight
         self.objectness_loss_type = objectness_loss_type
+        self.objectness_loss_weight = objectness_loss_weight
         self.threshold = threshold
         self.threshold2 = threshold2
+        self.use_threshold2 = use_threshold2
         self.rpn_head = rpn_head
 
         # 100 is for 8 scans per gpu
@@ -53,8 +57,10 @@ class VotingRPN(nn.Module):
             "centerness_loss_weight": cfg.MODEL.RPN.CENTERNESS_LOSS_WEIGHT,
             "box_reg_loss_weight": cfg.MODEL.RPN.BBOX_REG_LOSS_WEIGHT,
             "objectness_loss_type": cfg.MODEL.RPN.OBJECTNESS_LOSS_TYPE,
+            "objectness_loss_weight": cfg.MODEL.RPN.OBJECTNESS_LOSS_WEIGHT,
             "threshold": cfg.MODEL.RPN.THRESHOLD,
             "threshold2": cfg.MODEL.RPN.THRESHOLD2,
+            "use_threshold2": cfg.MODEL.RPN.USE_THRESHOLD2,
             "rpn_head": build_rpn_head(cfg),
         }
 
@@ -119,9 +125,9 @@ class VotingRPN(nn.Module):
     ):
         # TODO: cross_entropy
         if self.objectness_loss_type != "cross_entropy":
-            pred_objectness = pred_objectness_logits.detach().sigmoid()
+            pred_objectness_scores = pred_objectness_logits.detach().sigmoid().squeeze(-1)
         else:
-            pred_objectness = pred_objectness_logits.detach().softmax(dim=-1)[..., 1]
+            pred_objectness_scores = pred_objectness_logits.detach().softmax(dim=-1)[..., 1]
 
         if pred_heading_cls_logits is not None:
             if gt_heading_classes is None:
@@ -139,11 +145,11 @@ class VotingRPN(nn.Module):
             pred_heading_angles = None
 
         proposals = []
-        for i, (pred_objectness_i, pred_origins_i, pred_box_reg_i) in enumerate(zip(
-                pred_objectness, proposal_xyz.detach(), pred_box_reg.detach()
+        for i, (pred_objectness_scores_i, pred_origins_i, pred_box_reg_i) in enumerate(zip(
+                pred_objectness_scores, proposal_xyz.detach(), pred_box_reg.detach()
         )):
             instances = Instances()
-            instances.pred_objectness = pred_objectness_i
+            instances.objectness_scores = pred_objectness_scores_i.detach()
             instances.proposal_boxes = Boxes.from_tensor(
                 pred_box_reg_i,
                 mode=BoxMode.XYZLBDRFU_ABS,
@@ -207,6 +213,7 @@ class VotingRPN(nn.Module):
         self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
                 1 - self.loss_normalizer_momentum
         ) * max(num_pos, 1)
+        self.loss_normalizer = max(num_pos, 1)
 
         # TODO: make box_reg_loss_type configurable
         losses = {}
@@ -218,14 +225,23 @@ class VotingRPN(nn.Module):
                 pred_objectness_logits[valid_mask].squeeze(-1),
                 gt_labels[valid_mask].float(),
                 reduction="sum",
-            ) / self.loss_normalizer
+            ) / self.loss_normalizer * self.objectness_loss_weight
         elif self.objectness_loss_type == "cross_entropy":
+            # TODO:
+            """
             losses["loss_objectness"] = F.cross_entropy(
                 pred_objectness_logits[valid_mask],
                 gt_labels[valid_mask],
                 weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
                 reduction="mean",
-            )
+            ) * self.objectness_loss_weight
+            """
+            losses["loss_objectness"] = F.cross_entropy(
+                pred_objectness_logits[valid_mask],
+                gt_labels[valid_mask],
+                weight=torch.as_tensor([0.2, 0.8], dtype=dtype, device=device),
+                reduction="sum",
+            ) / (num_pos + num_neg) * self.objectness_loss_weight
         elif self.objectness_loss_type == "sigmoid_focal_loss":
             losses["loss_objectness"] = sigmoid_focal_loss(
                 pred_objectness_logits[valid_mask].squeeze(-1),
@@ -233,7 +249,7 @@ class VotingRPN(nn.Module):
                 alpha=0.25,
                 gamma=2.0,
                 reduction="sum",
-            ) / self.loss_normalizer
+            ) / self.loss_normalizer * self.objectness_loss_weight
         else:
             raise NotImplementedError
 
@@ -317,10 +333,13 @@ class VotingRPN(nn.Module):
             gt_labels_i = torch.zeros(num_proposals, dtype=torch.int64, device=device)
             pos_mask = (dists < threshold) & inside_mask
             gt_labels_i[pos_mask] = 1
-            ignore_mask = (~pos_mask) & (dists < threshold2)
-            gt_labels_i[ignore_mask] = -1
-            gt_classes_i[ignore_mask] = -1
-            neg_mask = (~pos_mask) & (dists >= threshold2)
+            if self.use_threshold2:
+                ignore_mask = (~pos_mask) & (dists < threshold2)
+                gt_labels_i[ignore_mask] = -1
+                gt_classes_i[ignore_mask] = -1
+                neg_mask = (~pos_mask) & (dists >= threshold2)
+            else:
+                neg_mask = ~pos_mask
             gt_classes_i[neg_mask] = self.num_classes  # background
 
             tensor = gt_boxes_i.get_tensor(assert_mode=BoxMode.XYZLBDRFU_ABS)

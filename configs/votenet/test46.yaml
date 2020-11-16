@@ -7,11 +7,11 @@ MODEL:
     BBOX_REG_LOSS_WEIGHT: 20.0
     USE_EXP: True
     THRESHOLD2: 0.4
-    OBJECTNESS_LOSS_TYPE: "cross_entropy"
+    OBJECTNESS_LOSS_TYPE: "sigmoid_focal_loss"
     CENTERNESS: False
   ROI_BOX_HEAD:
     BBOX_REG_LOSS_WEIGHT: 20.0
-    CLS_LOSS_WEIGHT: 1.0
+    CLS_LOSS_WEIGHT: 0.5
     CLS_LOSS_TYPE: "sigmoid_focal_loss"
     CENTERNESS: False
 SOLVER:
@@ -25,4 +25,4 @@ SOLVER:
 DATASETS:
   TRAIN: ("scannet_v2/train",)
   TEST: ("scannet_v2/val",)
-OUTPUT_DIR: "./output/_test"
+OUTPUT_DIR: "./output/test46"

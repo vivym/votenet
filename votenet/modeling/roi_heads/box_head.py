@@ -84,9 +84,10 @@ class StandardBoxHead(nn.Module):
             if predictor.bias is not None:
                 nn.init.constant_(predictor.bias, 0)
 
-        # Use prior in model initialization to improve stability
-        bias_value = -(math.log((1 - prior_prob) / prior_prob))
-        nn.init.constant_(self.cls_predictor.bias, bias_value)
+        if cls_loss_type == "sigmoid_focal_loss":
+            # Use prior in model initialization to improve stability
+            bias_value = -(math.log((1 - prior_prob) / prior_prob))
+            nn.init.constant_(self.cls_predictor.bias, bias_value)
 
     @classmethod
     def from_config(cls, cfg):
