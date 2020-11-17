@@ -122,7 +122,7 @@ class StandardROIHeads(nn.Module):
         # TODO: yield proposals when training
         if not self.training or False:
             pred_instances = self.predict_instances(
-                pred_cls_logits, pred_box_deltas, pred_heading_deltas, proposals
+                pred_cls_logits, pred_box_deltas, pred_centerness, pred_heading_deltas, proposals
             )
         else:
             pred_instances = None
@@ -133,6 +133,7 @@ class StandardROIHeads(nn.Module):
             self,
             pred_cls_logits: torch.Tensor,  # (bs, num_proposals, num_classes + 1)
             pred_box_deltas: torch.Tensor,  # (bs, num_proposals, num_classes, 6)
+            pred_centerness: torch.Tensor, # (bs, num_proposals)
             pred_heading_deltas: Optional[torch.Tensor],  # (bs, num_proposals, num_classes)
             proposals: List[Instances],
     ):
