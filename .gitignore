@@ -2,6 +2,10 @@
 /datasets
 
 
+### VS Code ###
+.vscode
+
+
 ### PyCharm ###
 .idea
 
