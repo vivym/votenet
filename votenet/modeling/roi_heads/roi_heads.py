@@ -80,6 +80,8 @@ class StandardROIHeads(nn.Module):
     def from_config(cls, cfg):
         grid_size = cfg.MODEL.ROI_HEADS.GRID_SIZE
         seed_feature_dim = cfg.MODEL.ROI_HEADS.SEED_FEATURE_DIM
+        rep_type = cfg.MODEL.ROI_HEADS.REP_TYPE
+        ray_density = cfg.MODEL.ROI_HEADS.RAY_DENSITY
 
         return {
             "num_classes": cfg.MODEL.ROI_HEADS.NUM_CLASSES,
@@ -88,7 +90,7 @@ class StandardROIHeads(nn.Module):
             "cls_loss_weight": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_WEIGHT,
             "cls_loss_type": cfg.MODEL.ROI_BOX_HEAD.CLS_LOSS_TYPE,
             "cls_agnostic_bbox_reg": cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
-            "pooler": ROIGridPooler(grid_size, seed_feature_dim),
+            "pooler": ROIGridPooler(grid_size, seed_feature_dim, rep_type, ray_density),
             "box_head": build_box_head(cfg),
         }
 

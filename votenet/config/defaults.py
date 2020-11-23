@@ -124,6 +124,8 @@ _C.MODEL.ROI_HEADS.NAME = "StandardROIHeads"
 _C.MODEL.ROI_HEADS.NUM_CLASSES = 18
 _C.MODEL.ROI_HEADS.SEED_FEATURE_DIM = 256
 _C.MODEL.ROI_HEADS.GRID_SIZE = 3
+_C.MODEL.ROI_HEADS.REP_TYPE = "grid"
+_C.MODEL.ROI_HEADS.RAY_DENSITY = 1
 
 
 # ---------------------------------------------------------------------------- #

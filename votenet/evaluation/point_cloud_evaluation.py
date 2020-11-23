@@ -107,8 +107,6 @@ class PointCloudEvaluation(DatasetEvaluator):
         Evaluate predictions on the given tasks.
         Fill self._results with the metrics of the tasks.
         """
-        # TODO: comment it
-        torch.save(predictions, "predictions.pth")
         all_pred = defaultdict(lambda: defaultdict(list))
         all_gt_boxes = defaultdict(lambda: defaultdict(list))
         for prediction in predictions:
@@ -130,7 +128,7 @@ class PointCloudEvaluation(DatasetEvaluator):
         ars = defaultdict(list)
         # TODO: get class ids from Metadata
         for cls in all_gt_boxes.keys():
-            for thresh in [25, 50]:
+            for thresh in [25, 50, 75]:
                 rec, prec, ap = voc_eval(
                     all_pred[cls],
                     all_gt_boxes[cls],
@@ -143,8 +141,8 @@ class PointCloudEvaluation(DatasetEvaluator):
         mAP = {iou: np.mean(x) for iou, x in aps.items()}
         mAR = {iou: np.mean(x) for iou, x in ars.items()}
         self._results["bbox"] = {
-            "AP": np.mean(list(mAP.values())), "AP25": mAP[25], "AP50": mAP[50],
-            "AR": np.mean(list(mAR.values())), "AR25": mAR[25], "AR50": mAR[50],
+            "AP": np.mean(list(mAP.values())), "AP25": mAP[25], "AP50": mAP[50], "AP75": mAP[75],
+            "AR": np.mean(list(mAR.values())), "AR25": mAR[25], "AR50": mAR[50], "AR75": mAR[75],
         }
 
     def _eval_box_proposals(self, predictions):

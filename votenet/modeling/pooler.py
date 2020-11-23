@@ -14,11 +14,18 @@ class ROIGridPooler(nn.Module):
     feature maps.
     """
 
-    def __init__(self, grid_size, seed_feat_dim):
+    def __init__(self, grid_size, seed_feat_dim, rep_type, density):
         super().__init__()
 
         self.grid_size = grid_size
-        self.num_key_points = grid_size ** 3
+        self.density = density
+        self.rep_type = rep_type
+        if rep_type == "grid":
+            self.num_key_points = grid_size ** 3
+        elif rep_type == "ray":
+            self.num_key_points = density * 6
+        else:
+            raise NotImplementedError
 
         self.seed_aggregation = PointnetSAMoudleAgg(
             radius=0.2,
@@ -50,10 +57,18 @@ class ROIGridPooler(nn.Module):
         else:
             pred_heading_angles = torch.zeros(batch_size, num_proposals, dtype=dtype, device=device)
 
-        # (bs, num_proposal, num_key_points, 3)
-        key_points = get_global_grid_points_of_rois(
-            pred_origins, pred_box_reg, pred_heading_angles, grid_size=self.grid_size
-        )
+        if self.rep_type == "grid":
+            # (bs, num_proposal, num_key_points, 3)
+            key_points = get_global_grid_points_of_rois(
+                pred_origins, pred_box_reg, pred_heading_angles, grid_size=self.grid_size
+            )
+        elif self.rep_type == "ray":
+            key_points = convert_params_to_points(
+                pred_origins, pred_box_reg, pred_heading_angles, density=self.density
+            )
+        else:
+            raise NotImplementedError
+
         # (bs, num_proposal * num_key_points, 3)
         key_points = key_points.view(batch_size, -1, 3)
 
@@ -68,6 +83,31 @@ class ROIGridPooler(nn.Module):
         features = self.reduce_dim(features)
 
         return features
+
+
+def convert_params_to_points(center, rois, angle, density=1):
+    batch_size, num_proposal, _ = rois.shape  # (B, N, 6)
+    R = rotz_batch_pytorch(angle).reshape(-1, 3, 3)  # Rotation matrix ~ (B*N, 3, 3)
+    # Convert param pairs (rois, angle) to point locations
+    num_key_points = density * 6
+    back_proj_points = torch.zeros((batch_size, num_proposal, 6, 3)).cuda()  # (B, N, 6, 3)
+    back_proj_points[:, :, 0, 0] = - rois[:, :, 0]  # back
+    back_proj_points[:, :, 1, 1] = - rois[:, :, 1]  # left
+    back_proj_points[:, :, 2, 2] = - rois[:, :, 2]  # down
+    back_proj_points[:, :, 3, 0] = rois[:, :, 3]  # front
+    back_proj_points[:, :, 4, 1] = rois[:, :, 4]  # right
+    back_proj_points[:, :, 5 ,2] = rois[:, :, 5]  # up
+    back_proj_points = back_proj_points.reshape(-1, 6, 3)  # (B*N, 6, 3)
+    local_points = [back_proj_points*float(i/density) for i in range(density, 0, -1)]
+    local_points = torch.stack(local_points, dim=1)  # (B*N, density, 6, 3)
+    local_points = local_points.transpose(1,2).contiguous()  # (B*N, 6, density, 3)
+    local_points = local_points.reshape(-1, num_key_points, 3)  # (B*N, num_key_points, 3)
+    local_points_rotated = torch.matmul(local_points, R)  # (B*N, num_key_points, 3)
+    center = center.reshape(batch_size*num_proposal, 1, 3)  # (B*N, 1, 3)
+    global_points = local_points_rotated + center  # (B*N, num_key_points, 3)
+    global_points = global_points.reshape(batch_size, num_proposal, num_key_points, 3)  # (B, N, num_key_points, 3)
+
+    return global_points
 
 
 def get_global_grid_points_of_rois(center, rois, heading_angle, grid_size):
