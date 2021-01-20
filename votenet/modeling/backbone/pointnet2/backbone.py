@@ -1,4 +1,8 @@
+from typing import Optional, Dict
+
 import torch
+from torch import nn
+from torch.nn import functional as F
 
 from votenet.modeling.backbone import Backbone, BACKBONE_REGISTRY
 
@@ -64,7 +68,7 @@ class PointNet2(Backbone):
 
         return xyz, features
 
-    def forward(self, points: torch.Tensor):
+    def forward(self, points: torch.Tensor, **kwargs):
         r"""
             Forward pass of the network
 
@@ -88,27 +92,35 @@ class PointNet2(Backbone):
         outputs = {}
 
         # --------- 4 SET ABSTRACTION LAYERS ---------
-        xyz, features, fps_inds = self.sa1(xyz, features)
+        xyz, features, fps_inds = self.sa1(
+            xyz, features, inds=kwargs["sa1_inds"] if "sa1_inds" in kwargs else None
+        )
         outputs["sa1"] = {
             "xyz": xyz,
             "features": features,
             "inds": fps_inds,
         }
 
-        xyz, features, fps_inds = self.sa2(xyz, features)
+        xyz, features, fps_inds = self.sa2(
+            xyz, features, inds=kwargs["sa2_inds"] if "sa2_inds" in kwargs else None
+        )
         outputs["sa2"] = {
             "xyz": xyz,
             "features": features,
             "inds": fps_inds,
         }
 
-        xyz, features, fps_inds = self.sa3(xyz, features)
+        xyz, features, fps_inds = self.sa3(
+            xyz, features, inds=kwargs["sa3_inds"] if "sa3_inds" in kwargs else None
+        )
         outputs["sa3"] = {
             "xyz": xyz,
             "features": features,
         }
 
-        xyz, features, fps_inds = self.sa4(xyz, features)
+        xyz, features, fps_inds = self.sa4(
+            xyz, features, inds=kwargs["sa4_inds"] if "sa4_inds" in kwargs else None
+        )
         outputs["sa4"] = {
             "xyz": xyz,
             "features": features,
@@ -135,6 +147,52 @@ class PointNet2(Backbone):
 
 @BACKBONE_REGISTRY.register()
 def build_pointnet2_backbone(cfg):
+    use_color = cfg.INPUT.USE_COLOR
+    use_height = cfg.INPUT.USE_HEIGHT
+
+    return PointNet2(int(use_color) * 3 + int(use_height) * 1)
+
+
+class MultiBackbone(nn.Module):
+    def __init__(self, input_feature_dim):
+        super().__init__()
+        self.backbones = nn.ModuleList((
+            PointNet2(input_feature_dim),
+            PointNet2(input_feature_dim),
+            PointNet2(input_feature_dim),
+            PointNet2(input_feature_dim)
+        ))
+
+        self.conv_agg1 = torch.nn.Conv1d(256 * 4, 256 * 2, 1)
+        self.bn_agg1 = torch.nn.BatchNorm1d(256 * 2)
+        self.conv_agg2 = torch.nn.Conv1d(256 * 2, 256, 1)
+        self.bn_agg2 = torch.nn.BatchNorm1d(256)
+
+    def forward(self, x: torch.Tensor):
+        features = self.backbones(x)
+        xyz = features[0]["fp2"]["xyz"]
+        inds = features[0]["fp2"]["inds"].long()
+
+        features = torch.cat((
+            features[0]["fp2"]["features"],
+            features[1]["fp2"]["features"],
+            features[2]["fp2"]["features"],
+            features[3]["fp2"]["features"],
+        ), dim=1)
+        features = F.relu(self.bn_agg1(self.conv_agg1(features)))
+        features = F.relu(self.bn_agg2(self.conv_agg2(features)))
+
+        return {
+            "fp2": {
+                "xyz": xyz,
+                "features": features,
+                "inds": inds
+            }
+        }
+
+
+@BACKBONE_REGISTRY.register()
+def build_multi_pointnet2_backbone(cfg):
     use_color = cfg.INPUT.USE_COLOR
     use_height = cfg.INPUT.USE_HEIGHT
 
