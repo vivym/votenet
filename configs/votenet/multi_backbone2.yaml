@@ -3,6 +3,8 @@ INPUT:
   RANDOM_SCALE: None
 MODEL:
   OVERALL_LOSS_MULTIPLIER: 10.0
+  BACKBONE:
+    NAME: "build_multi_pointnet2_backbone"
   RPN:
     BBOX_REG_LOSS_WEIGHT: 20.0
     USE_EXP: True
@@ -30,4 +32,4 @@ DATASETS:
   TRAIN: ("scannet_v2/train",)
   TEST: ("scannet_v2/val",)
 SEED: 29819964
-OUTPUT_DIR: "./output/test54"
+OUTPUT_DIR: "./output/multi_backbone2"

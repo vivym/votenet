@@ -30,4 +30,4 @@ DATASETS:
   TRAIN: ("scannet_v2/train",)
   TEST: ("scannet_v2/val",)
 SEED: 29819964
-OUTPUT_DIR: "./output/test54"
+OUTPUT_DIR: "./output/single_backbone"
